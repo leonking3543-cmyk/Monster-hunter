@@ -1009,7 +1009,7 @@ def capture_wild(wild, data):
 
 tree = bot.tree
 
-@tree.command(name="cacar", description="Encontra um monstro selvagem para caçar!")
+@tree.command(name="caçar", description="Encontra um monstro selvagem para caçar!")
 async def hunt(interaction: discord.Interaction):
     uid = interaction.user.id
     data = load_save(uid)
@@ -1041,7 +1041,7 @@ async def team_cmd(interaction: discord.Interaction):
     team = data.get("team", [])
 
     if not team:
-        await interaction.response.send_message("😔 Ainda não tens monstros! Usa `/cacar` para capturar o teu primeiro.", ephemeral=True); return
+        await interaction.response.send_message("😔 Ainda não tens monstros! Usa `/caçar` para capturar o teu primeiro.", ephemeral=True); return
 
     embed = discord.Embed(title="🐾 A Tua Equipa", color=0xffd700)
     active_id = data.get("activeMonId")
@@ -1365,7 +1365,7 @@ async def use_item(interaction: discord.Interaction, item: str):
         data["forcedRarity"] = "épico"
         msg = "💎 Isco Épico ativado! O próximo monstro será Épico ou superior!"
     elif item_id == "goldenball":
-        msg = "🌟 Golden Ball pronta! Será usada automaticamente no próximo `/cacar` → Ball."
+        msg = "🌟 Golden Ball pronta! Será usada automaticamente no próximo `/caçar` → Ball."
 
     items[item_id] -= 1
     data["items"] = items
@@ -1540,7 +1540,7 @@ async def help_cmd(interaction: discord.Interaction):
         color=0xffd700
     )
     cmds = [
-        ("🏹 `/cacar`", "Encontra e captura um monstro selvagem"),
+        ("🏹 `/caçar`", "Encontra e captura um monstro selvagem"),
         ("🐾 `/equipa`", "Vê a tua equipa de monstros"),
         ("📦 `/box`", "Vê os monstros na tua Box"),
         ("⭐ `/ativar [pos]`", "Define o monstro ativo (posição 1-6)"),
