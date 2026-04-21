@@ -465,7 +465,7 @@ class BattleView(discord.ui.View):
         data = load_save(self.uid)
         wild = data.get("wild")
         if not wild or not data.get("inBattle"):
-            await interaction.response.edit_message(content="Sem batalha ativa. Usa /cacar.", embed=None, view=None)
+            await interaction.response.edit_message(content="Sem batalha ativa. Usa /caçar.", embed=None, view=None)
             return None, None
         return data, wild
 
