@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import time
 from typing import Optional
 
 import discord
@@ -49,6 +50,11 @@ except ImportError:
 TOKEN = os.environ.get("DISCORD_TOKEN", "").strip()
 SAVES_DIR = "saves"
 os.makedirs(SAVES_DIR, exist_ok=True)
+
+# Cooldown (segundos) entre ataques, tanto em caça selvagem como em bosses.
+ATTACK_COOLDOWN = 5.0
+# Chance (0.0-1.0) de um boss aparecer aleatoriamente ao caçar.
+WILD_BOSS_CHANCE = 0.08
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
@@ -334,22 +340,44 @@ BOSS_INDEX = {b["n"]: b for b in BOSSES}
 # ══════════════════════════════════════════════════════════════
 
 SHOP_ITEMS = [
-    {"id": "superball",  "n": "Super Ball",   "e": "🔵", "price": 40,  "desc": "+15% captura (próximo lançamento)"},
-    {"id": "ultraball",  "n": "Ultra Ball",   "e": "🟣", "price": 90,  "desc": "+25% captura (próximo lançamento)"},
-    {"id": "masterball", "n": "Master Ball",  "e": "⭐", "price": 220, "desc": "Captura garantida (máx 1)"},
-    {"id": "potion",     "n": "Poção",        "e": "🧪", "price": 25,  "desc": "Cura 60 HP"},
-    {"id": "superpotion","n": "Super Poção",  "e": "💚", "price": 70,  "desc": "Cura 150 HP"},
-    {"id": "megapotion", "n": "Mega Poção",   "e": "💊", "price": 120, "desc": "Cura 50% do HP máximo"},
-    {"id": "hyperpotion","n": "Hyper Poção",  "e": "✨", "price": 220, "desc": "Cura 100% do HP máximo"},
-    {"id": "revive",     "n": "Revive",       "e": "❤️","price": 120, "desc": "Reanima com 75% HP"},
-    {"id": "maxrevive",  "n": "Max Revive",   "e": "💖", "price": 280, "desc": "Reanima com HP total"},
-    {"id": "protein",    "n": "Proteína",     "e": "💪", "price": 95,  "desc": "+10 ATK permanente"},
-    {"id": "heartseed",  "n": "Semente Vital","e": "🌱", "price": 95,  "desc": "+10 HP permanente"},
-    {"id": "tiercore",   "n": "Tier Core",    "e": "🔺", "price": 500, "desc": "+1 Tier no monstro ativo"},
-    {"id": "balls5",     "n": "Pack Balls",   "e": "🔮", "price": 35,  "desc": "+5 Monster Balls"},
-    {"id": "shield",     "n": "Escudo Mágico","e": "🛡️","price": 80,  "desc": "Absorve 40% do próximo dano (boss)"},
-    {"id": "xatk",       "n": "X-Ataque",     "e": "💢", "price": 20,  "desc": "+60% dano no próximo ataque"},
-    {"id": "neoncage",   "n": "Gaiola Néon",  "e": "���", "price": 160, "desc": "+35% captura em Néon/Mecânico/Nuclear"},
+    # === BALLS / CAPTURA ===
+    {"id": "superball",  "n": "Super Ball",          "e": "🔵", "price": 40,  "desc": "+15% captura por uso"},
+    {"id": "ultraball",  "n": "Ultra Ball",          "e": "🟣", "price": 90,  "desc": "+25% captura por uso"},
+    {"id": "masterball", "n": "Master Ball",         "e": "⭐", "price": 220, "desc": "Captura garantida (máx 1)"},
+    {"id": "balls5",     "n": "Pack Balls",          "e": "🔮", "price": 35,  "desc": "+5 Monster Balls"},
+    {"id": "goldenball", "n": "Golden Ball",         "e": "🌟", "price": 350, "desc": "+60% captura (quebra em falha)"},
+    {"id": "dragoball",  "n": "Drago Ball",          "e": "🔴", "price": 180, "desc": "+40% captura em Dragão/Fantasma/Arcano"},
+    {"id": "neoncage",   "n": "Gaiola Néon",         "e": "🟩", "price": 160, "desc": "+35% captura em Néon/Mecânico/Nuclear"},
+    {"id": "soulcatcher","n": "Apanhador de Almas",  "e": "👻", "price": 200, "desc": "+50% captura em Fantasma/Espírito"},
+    {"id": "rarepotion", "n": "Poção Rara",          "e": "💜", "price": 150, "desc": "+30% captura em monstros raros+"},
+
+    # === POÇÕES / CURA ===
+    {"id": "potion",     "n": "Poção",               "e": "🧪", "price": 25,  "desc": "Cura 60 HP"},
+    {"id": "superpotion","n": "Super Poção",         "e": "💚", "price": 70,  "desc": "Cura 150 HP"},
+    {"id": "megapotion", "n": "Mega Poção",          "e": "💊", "price": 120, "desc": "Cura 50% do HP máximo"},
+    {"id": "hyperpotion","n": "Hyper Poção",         "e": "✨", "price": 220, "desc": "Cura 100% do HP máximo"},
+    {"id": "revive",     "n": "Revive",              "e": "❤️","price": 120, "desc": "Reanima com 75% HP"},
+    {"id": "maxrevive",  "n": "Max Revive",          "e": "💖", "price": 280, "desc": "Reanima com HP total"},
+
+    # === BOOSTS PERMANENTES ===
+    {"id": "protein",    "n": "Proteína",            "e": "💪", "price": 95,  "desc": "+10 ATK permanente"},
+    {"id": "heartseed",  "n": "Semente Vital",       "e": "🌱", "price": 95,  "desc": "+10 HP permanente"},
+    {"id": "tiercore",   "n": "Tier Core",           "e": "🔺", "price": 500, "desc": "+1 Tier no monstro ativo"},
+
+    # === BATALHA / BOSSES ===
+    {"id": "xatk",       "n": "X-Ataque",            "e": "💢", "price": 20,  "desc": "+60% dano no próximo ataque"},
+    {"id": "shield",     "n": "Escudo Mágico",       "e": "🛡️","price": 80,  "desc": "Absorve 40% do dano (boss, 1x)"},
+    {"id": "ritual",     "n": "Ritual Boss",         "e": "🕯️","price": 180, "desc": "Convoca um boss imediatamente"},
+    {"id": "repelent",   "n": "Repelente",           "e": "🕊️","price": 120, "desc": "Afasta bosses por 5 minutos"},
+
+    # === SPAWN / PASSIVOS ===
+    {"id": "charm",      "n": "Amuleto",             "e": "🍀", "price": 60,  "desc": "+drops de materiais (passivo)"},
+    {"id": "incense",    "n": "Incenso Raro",        "e": "🎁", "price": 150, "desc": "+chance passiva de raros a míticos"},
+    {"id": "megaincense","n": "Mega Incenso",        "e": "🌺", "price": 400, "desc": "+300% raros/épicos/lendários (30s)"},
+    {"id": "raredecoy",  "n": "Isco Raro",           "e": "🧲", "price": 250, "desc": "Força spawn de Raro+ (1x)"},
+    {"id": "epicdecoy",  "n": "Isco Épico",          "e": "💎", "price": 500, "desc": "Força spawn de Épico+ (1x)"},
+    {"id": "typelure",   "n": "Isca de Tipo",        "e": "🎣", "price": 300, "desc": "Próximo monstro é do tipo escolhido"},
+    {"id": "typedetect", "n": "Detector de Tipos",   "e": "📡", "price": 80,  "desc": "Mostra o tipo do próximo monstro"},
 ]
 
 SHOP_INDEX = {s["id"]: s for s in SHOP_ITEMS}
@@ -705,7 +733,7 @@ def embed_profile(user: discord.abc.User, data: dict) -> discord.Embed:
     if is_pokedex_complete(data) and "Leonking" not in bosses and "???" not in bosses:
         embed.add_field(
             name="🌌 POKÉDEX COMPLETA!",
-            value="Usa `/desafiar_final` para enfrentar o **DEUS ABSOLUTO**!",
+            value="Abre a `/pokedex` e usa o botão **🌌 Desafiar DEUS ABSOLUTO**!",
             inline=False,
         )
     if "Leonking" in bosses or "???" in bosses:
@@ -812,7 +840,7 @@ def embed_pokedex(user: discord.abc.User, data: dict) -> discord.Embed:
     if is_pokedex_complete(data) and "Leonking" not in bosses:
         embed.add_field(
             name="🌟 POKÉDEX COMPLETA",
-            value="Usa `/desafiar_final` para o **DEUS ABSOLUTO**!",
+            value="Carrega no botão **🌌 Desafiar DEUS ABSOLUTO** para a batalha final!",
             inline=False,
         )
     return embed
@@ -1029,6 +1057,70 @@ def embed_boss(data: dict, msg: str = "") -> discord.Embed:
 # VIEW: CAÇA (batalha contra selvagem)
 # ══════════════════════════════════════════════════════════════
 
+class PokedexView(discord.ui.View):
+    """View anexada ao embed da Pokédex. Mostra o botão do DEUS ABSOLUTO
+    apenas quando a Pokédex está completa e o boss final ainda não caiu."""
+
+    def __init__(self, uid: int, data: dict):
+        super().__init__(timeout=300)
+        self.uid = uid
+        bosses = data.get("bossDefeated", [])
+        unlocked = is_pokedex_complete(data) and "Leonking" not in bosses and "???" not in bosses
+        self.final_btn.disabled = not unlocked
+        if not unlocked:
+            self.final_btn.label = "🔒 DEUS ABSOLUTO (bloqueado)"
+
+    @discord.ui.button(label="🌌 Desafiar DEUS ABSOLUTO", style=discord.ButtonStyle.danger)
+    async def final_btn(self, interaction: discord.Interaction, _: discord.ui.Button):
+        if interaction.user.id != self.uid:
+            await interaction.response.send_message("❌ Não é a tua Pokédex!", ephemeral=True)
+            return
+        data = load_save(self.uid)
+        if data.get("inBattle") or data.get("inBossBattle"):
+            await interaction.response.send_message("⚔️ Já estás em batalha!", ephemeral=True)
+            return
+        if not is_pokedex_complete(data):
+            await interaction.response.send_message(
+                f"❌ Pokédex incompleta: **{pokedex_progress(data)}/{pokedex_total()}**",
+                ephemeral=True,
+            )
+            return
+        if "Leonking" in data.get("bossDefeated", []) or "???" in data.get("bossDefeated", []):
+            await interaction.response.send_message(
+                "👑 Já derrotaste o DEUS ABSOLUTO LEONKING!", ephemeral=True
+            )
+            return
+        active = get_active_mon(data)
+        if not active or not active.get("alive"):
+            await interaction.response.send_message(
+                "❌ Precisas de um monstro vivo para esta batalha!", ephemeral=True
+            )
+            return
+
+        final = next((b for b in BOSSES if b.get("special") == "final_boss"), None)
+        if not final:
+            await interaction.response.send_message("❌ Boss final não encontrado!", ephemeral=True)
+            return
+
+        start_boss_battle(data, final, active)
+        write_save(self.uid, data)
+
+        em = discord.Embed(
+            title="🌌 O DEUS ABSOLUTO DESPERTOU!",
+            description=(
+                "# ❓ ???\n*O ser que transcende a realidade...*\n\n"
+                "⚠️ **Esta é uma batalha em DUAS FASES!**\n"
+                "1️⃣ Derrota a forma `???` (não podes capturá-la)\n"
+                "2️⃣ Enfrenta então o verdadeiro **Leonking** — O Rei dos Deuses\n\n"
+                f"❤️ HP: **{fmt_num(final['hp'])}**  ·  ⚔️ ATK: **{fmt_num(final['atk'])}**"
+            ),
+            color=0xff00ff,
+        )
+        em.set_footer(text="💡 Usa 🛡️ Defender quando vires o aviso de ataque especial!")
+        await interaction.response.send_message(embed=em)
+        await interaction.followup.send(embed=embed_boss(data, "A batalha começa!"), view=BossView(self.uid))
+
+
 class HuntView(discord.ui.View):
     def __init__(self, uid: int):
         super().__init__(timeout=300)
@@ -1053,6 +1145,17 @@ class HuntView(discord.ui.View):
         if not active or not active.get("alive"):
             await interaction.response.send_message("❌ Sem monstro ativo vivo!", ephemeral=True)
             return
+
+        # Cooldown de 5 segundos entre ataques
+        now = time.time()
+        next_at = data.get("nextAttackAt", 0.0)
+        if now < next_at:
+            remaining = next_at - now
+            await interaction.response.send_message(
+                f"⏳ Aguarda **{remaining:.1f}s** antes de atacar de novo!", ephemeral=True
+            )
+            return
+        data["nextAttackAt"] = now + ATTACK_COOLDOWN
 
         refresh_mon_stats(active)
         wild = data["wild"]
@@ -1307,6 +1410,16 @@ class BossView(discord.ui.View):
         if not active:
             await interaction.response.send_message("❌ Sem monstro ativo!", ephemeral=True)
             return
+        # Cooldown de 5 segundos entre ataques
+        now = time.time()
+        next_at = data.get("nextAttackAt", 0.0)
+        if now < next_at:
+            remaining = next_at - now
+            await interaction.response.send_message(
+                f"⏳ Aguarda **{remaining:.1f}s** antes de atacar de novo!", ephemeral=True
+            )
+            return
+        data["nextAttackAt"] = now + ATTACK_COOLDOWN
         refresh_mon_stats(active)
         boss = data["boss"]
         mult = get_type_mult(active.get("t", ""), boss.get("t", ""))
@@ -1623,8 +1736,11 @@ async def cmd_ativar(interaction: discord.Interaction, posicao: int):
 
 @tree.command(name="pokedex", description="Vê o teu progresso na Pokédex.")
 async def cmd_pokedex(interaction: discord.Interaction):
-    data = load_save(interaction.user.id)
-    await interaction.response.send_message(embed=embed_pokedex(interaction.user, data))
+    uid = interaction.user.id
+    data = load_save(uid)
+    await interaction.response.send_message(
+        embed=embed_pokedex(interaction.user, data), view=PokedexView(uid, data)
+    )
 
 
 @tree.command(name="inventario", description="Vê os teus itens e materiais.")
@@ -1700,7 +1816,7 @@ async def cmd_curar(interaction: discord.Interaction, tipo: str = "potion"):
             em = discord.Embed(
                 title="✨ O OXIGÉNIO BRILHA INTENSAMENTE!",
                 description="# 🐈 NICO APARECEU!\n*A Destruidora de Mundos ouviu o chamado...*\n\n"
-                            "⚠️ **Boss Secreto desbloqueado!** Usa `/boss` para enfrentá-la já.",
+                            "⚠️ **Boss Secreto desbloqueado!** Usa `/caçar` — ela vai aparecer!",
                 color=0xff00aa,
             )
             await interaction.response.send_message(embed=em)
@@ -1791,7 +1907,19 @@ async def cmd_usar(interaction: discord.Interaction, item: str):
     await interaction.response.send_message(f"✅ {active['e']} {active.get('species', '?')} — {msg}")
 
 
-@tree.command(name="caçar", description="Encontra um monstro selvagem para capturar.")
+def pick_random_wild_boss(data: dict) -> Optional[dict]:
+    """Devolve um boss aleatório que ainda não foi derrotado e pode aparecer
+    numa caça selvagem. Exclui boss final, Nico (secreto), Murilo e master-only."""
+    defeated = data.get("bossDefeated", [])
+    pool = [b for b in BOSSES
+            if b["n"] not in defeated
+            and b.get("special") not in ("master_only", "nico", "final_boss", "murilo")]
+    if not pool:
+        return None
+    return random.choice(pool)
+
+
+@tree.command(name="caçar", description="Encontra um monstro selvagem para capturar (bosses podem aparecer!).")
 async def cmd_cacar(interaction: discord.Interaction):
     uid = interaction.user.id
     data = load_save(uid)
@@ -1807,6 +1935,36 @@ async def cmd_cacar(interaction: discord.Interaction):
         )
         return
 
+    # Boss aleatório: precisa de monstro vivo para lutar e respeita o repelente.
+    active = get_active_mon(data)
+    now = time.time()
+    repel_until = data.get("bossRepelUntil", 0.0)
+    pending = data.get("pendingBoss")
+
+    boss_candidate: Optional[dict] = None
+    if pending and BOSS_INDEX.get(pending):
+        boss_candidate = BOSS_INDEX[pending]
+        data["pendingBoss"] = None
+    elif active and active.get("alive") and now >= repel_until and random.random() < WILD_BOSS_CHANCE:
+        boss_candidate = pick_random_wild_boss(data)
+
+    if boss_candidate and active and active.get("alive"):
+        start_boss_battle(data, boss_candidate, active)
+        write_save(uid, data)
+        em = discord.Embed(
+            title=f"⚠️ BOSS APARECEU: {boss_candidate['e']} {boss_candidate['n']}",
+            description=f"*{boss_candidate.get('title', '?')}*\n\nPreparado para a batalha?",
+            color=0x8a0020,
+        )
+        em.add_field(name="❤️ HP", value=fmt_num(data["bossMaxHp"]), inline=True)
+        em.add_field(name="⚔️ ATK", value=fmt_num(data["boss"]["atk"]), inline=True)
+        em.add_field(name="💰 Recompensa", value=fmt_num(boss_candidate.get("reward", 0)), inline=True)
+        em.set_footer(text="Usa os botões para lutar!")
+        await interaction.response.send_message(embed=em)
+        await interaction.followup.send(embed=embed_boss(data, "A batalha começa!"), view=BossView(uid))
+        return
+
+    # Monstro selvagem normal
     wild = spawn_wild(data)
     data["inBattle"] = True
     data["wild"] = wild
@@ -1814,132 +1972,6 @@ async def cmd_cacar(interaction: discord.Interaction):
     data["wildHp"] = wild["hp"]
     write_save(uid, data)
     await interaction.response.send_message(embed=embed_battle(data), view=HuntView(uid))
-
-
-@tree.command(name="bosses", description="Lista todos os bosses.")
-async def cmd_bosses(interaction: discord.Interaction):
-    data = load_save(interaction.user.id)
-    await interaction.response.send_message(embed=embed_bosses_list(data))
-
-
-@tree.command(name="boss", description="Desafia um boss.")
-@app_commands.describe(nome="Nome do boss (deixa em branco para aleatório)")
-async def cmd_boss(interaction: discord.Interaction, nome: Optional[str] = None):
-    uid = interaction.user.id
-    data = load_save(uid)
-    if data.get("inBattle") or data.get("inBossBattle"):
-        await interaction.response.send_message("⚔️ Já estás em batalha!", ephemeral=True)
-        return
-    active = get_active_mon(data)
-    if not active or not active.get("alive"):
-        await interaction.response.send_message(
-            "❌ Precisas de um monstro vivo! Usa `/curar` ou `/ativar`.", ephemeral=True
-        )
-        return
-
-    pending = data.get("pendingBoss")
-    boss: Optional[dict] = None
-
-    if nome:
-        boss = BOSS_INDEX.get(nome)
-        if not boss:
-            nomes = ", ".join(b["n"] for b in BOSSES if not b.get("special"))[:180]
-            await interaction.response.send_message(
-                f"❌ Boss não encontrado. Exemplos: {nomes}...", ephemeral=True
-            )
-            return
-        if boss.get("special") == "final_boss":
-            if not is_pokedex_complete(data):
-                await interaction.response.send_message(
-                    "🌌 O **DEUS ABSOLUTO** só pode ser desafiado com a Pokédex completa!\n"
-                    f"Progresso: **{pokedex_progress(data)}/{pokedex_total()}**",
-                    ephemeral=True,
-                )
-                return
-        if boss.get("special") == "nico" and pending != "Nico":
-            await interaction.response.send_message(
-                "🐈 **Nico** é boss secreto! Usa 3 **Poções** no **OXIGÉNIO** para a invocares.",
-                ephemeral=True,
-            )
-            return
-    elif pending and BOSS_INDEX.get(pending):
-        boss = BOSS_INDEX[pending]
-        data["pendingBoss"] = None
-    else:
-        defeated = data.get("bossDefeated", [])
-        pool = [b for b in BOSSES
-                if b["n"] not in defeated
-                and b.get("special") not in ("master_only", "nico", "final_boss", "murilo")]
-        if not pool:
-            pool = [b for b in BOSSES
-                    if b.get("special") not in ("master_only", "nico", "final_boss", "murilo")]
-        boss = random.choice(pool)
-
-    start_boss_battle(data, boss, active)
-    write_save(uid, data)
-
-    em = discord.Embed(
-        title=f"⚠️ BOSS APARECEU: {boss['e']} {boss['n']}",
-        description=f"*{boss.get('title', '?')}*\n\nPreparado para a batalha?",
-        color=0x8a0020,
-    )
-    em.add_field(name="❤️ HP", value=fmt_num(data["bossMaxHp"]), inline=True)
-    em.add_field(name="⚔️ ATK", value=fmt_num(data["boss"]["atk"]), inline=True)
-    em.add_field(name="💰 Recompensa", value=fmt_num(boss.get("reward", 0)), inline=True)
-    em.set_footer(text="Usa os botões para lutar!")
-    await interaction.response.send_message(embed=em)
-    # Mostra a HUD completa de seguida
-    await interaction.followup.send(embed=embed_boss(data, "A batalha começa!"), view=BossView(uid))
-
-
-@tree.command(name="desafiar_final", description="🌌 Desafia o DEUS ABSOLUTO (Pokédex completa).")
-async def cmd_final(interaction: discord.Interaction):
-    uid = interaction.user.id
-    data = load_save(uid)
-    if data.get("inBattle") or data.get("inBossBattle"):
-        await interaction.response.send_message("⚔️ Já estás em batalha!", ephemeral=True)
-        return
-    if not is_pokedex_complete(data):
-        await interaction.response.send_message(
-            f"❌ Pokédex incompleta: **{pokedex_progress(data)}/{pokedex_total()}**\n"
-            "💡 Captura todos os monstros e derrota todos os bosses para desbloquear!",
-            ephemeral=True,
-        )
-        return
-    if "Leonking" in data.get("bossDefeated", []) or "???" in data.get("bossDefeated", []):
-        await interaction.response.send_message(
-            "👑 Já derrotaste o DEUS ABSOLUTO LEONKING!", ephemeral=True
-        )
-        return
-    active = get_active_mon(data)
-    if not active or not active.get("alive"):
-        await interaction.response.send_message(
-            "❌ Precisas de um monstro vivo!", ephemeral=True
-        )
-        return
-
-    final = next((b for b in BOSSES if b.get("special") == "final_boss"), None)
-    if not final:
-        await interaction.response.send_message("❌ Boss final não encontrado!", ephemeral=True)
-        return
-
-    start_boss_battle(data, final, active)
-    write_save(uid, data)
-
-    em = discord.Embed(
-        title="🌌 O DEUS ABSOLUTO DESPERTOU!",
-        description=(
-            "# ❓ ???\n*O ser que transcende a realidade...*\n\n"
-            "⚠️ **Esta é uma batalha em DUAS FASES!**\n"
-            "1️⃣ Derrota a forma `???` (não podes capturá-la)\n"
-            "2️⃣ Enfrenta então o verdadeiro **Leonking** — O Rei dos Deuses\n\n"
-            f"❤️ HP: **{fmt_num(final['hp'])}**  ·  ⚔️ ATK: **{fmt_num(final['atk'])}**"
-        ),
-        color=0xff00ff,
-    )
-    em.set_footer(text="💡 Usa 🛡️ Defender quando vires o aviso de ataque especial!")
-    await interaction.response.send_message(embed=em)
-    await interaction.followup.send(embed=embed_boss(data, "A batalha começa!"), view=BossView(uid))
 
 
 @tree.command(name="trocar", description="Troca um monstro entre equipa e box.")
@@ -2023,10 +2055,9 @@ async def cmd_ajuda(interaction: discord.Interaction):
         name="🎮 Comandos principais",
         value=(
             "`/start` — começa a aventura\n"
-            "`/caçar` — caça monstros selvagens (não precisas de ter monstro vivo!)\n"
-            "`/boss [nome?]` — desafia um boss\n"
-            "`/desafiar_final` — 🌌 **DEUS ABSOLUTO** (Pokédex completa)\n"
-            "`/perfil`, `/equipa`, `/box`, `/pokedex`, `/bosses`\n"
+            "`/caçar` — caça monstros selvagens (bosses podem aparecer! Ataque c/ cooldown 5s)\n"
+            "🌌 **DEUS ABSOLUTO** — usa o botão na `/pokedex` quando estiver completa\n"
+            "`/perfil`, `/equipa`, `/box`, `/pokedex`\n"
             "`/ativar [pos]` — trocar monstro ativo\n"
             "`/curar [tipo]` — cura com poções\n"
             "`/usar [item]` — protein, heartseed, tiercore\n"
