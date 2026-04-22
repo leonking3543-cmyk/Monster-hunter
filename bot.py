@@ -794,7 +794,7 @@ class BattleView(discord.ui.View):
             if outros:
                 msg_parts.append(f"Ainda tens **{len(outros)}** monstro(s) vivo(s). Usa /ativar.")
             else:
-                msg_parts.append("💀 Todos os monstros KO. Usa /curar.")
+                msg_parts.append("💀 O monstro foi derrotado!/ou perdeste.Usa /curar.")
             self._end_battle(data)
             write_save(self.uid, data)
             hp_pct = wild["hp"] / max(1, wild.get("maxHp", max(wild["hp"], 1)))
