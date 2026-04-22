@@ -108,7 +108,7 @@ TYPE_DEFS = [
      "emojis": ["⚡","🔋","🐹","💡","📻","💾","🦘","🌩️","📀","🔌","🚨","🪫","📱","🗜️","🥁"]},
     {"t": "sombra", "c": 0x5960b8, "mat": "Essência","hpMod": -1, "atkMod": 3,
      "names": ["Breuzinho","Sombralho","Ocultim","Vultito","Umbralim","Nocturo","Escurix","Véunegra","Tenebris","Mistumbrio","Abysmino","Sombrakar","Vaziurno","Crepux","Noxthar"],
-     "emojis": ["🌑","🦇","🐈‍⬛","🕳️","🕸️","🎩","♠️","🌘","🕷️","🖤","🌒","🥷","🌌","👁️","🪦"]},
+     "emojis": ["🌑","🦇","🐈‍⬛","🕳️","🕸️","����","♠️","🌘","🕷️","🖤","🌒","🥷","🌌","👁️","🪦"]},
     {"t": "cristal","c": 0x73cfe0, "mat": "Gema",    "hpMod": 1,  "atkMod": 2,
      "names": ["Facetim","Brilhux","Vidrilho","Lúmino","Gemarim","Prismal","Reflexor","Cintilux","Quartzel","Luzcrist","Diamar","Shinério","Prismon","Glamyte","Luxórion"],
      "emojis": ["💎","🪩","🔷","💠","🔮","💍","👑","🪞","🧂","🔹","🧿","🪙","🪬","❇️","✴️"]},
@@ -172,43 +172,44 @@ TYPE_DEFS = [
 ]
 
 # Chart de tipos — vantagens dão x1.5, desvantagens x0.67, neutro x1.0
+# (Mapeamento 1:1 com a tabela oficial de tipos do jogo.)
 TYPE_CHART = {
-    "fogo":     {"adv": ["gelo","planta","inseto","metal"],  "dis": ["terra","água","magma"]},
-    "água":     {"adv": ["fogo","gelo","magma"],             "dis": ["planta","trovão"]},
-    "planta":   {"adv": ["água","terra"],                    "dis": ["fogo","veneno","gelo"]},
-    "terra":    {"adv": ["trovão","fogo","veneno"],          "dis": ["planta","cristal"]},
-    "ar":       {"adv": ["veneno","sombra","inseto"],        "dis": ["cosmos","metal"]},
-    "gelo":     {"adv": ["luz","veneno","planta"],           "dis": ["fogo","água"]},
-    "trovão":   {"adv": ["água","som","mecânico"],           "dis": ["terra","sombra"]},
-    "sombra":   {"adv": ["cosmos","trovão","psíquico"],      "dis": ["luz","ar","fada"]},
-    "cristal":  {"adv": ["terra","tempo"],                   "dis": ["som"]},
-    "veneno":   {"adv": ["planta","metal"],                  "dis": ["ar","gelo"]},
-    "som":      {"adv": ["cristal","metal"],                 "dis": ["cosmos","trovão"]},
-    "luz":      {"adv": ["tempo","sombra","fantasma"],       "dis": ["metal","gelo"]},
-    "tempo":    {"adv": ["cosmos","trovão"],                 "dis": ["luz","cristal"]},
-    "metal":    {"adv": ["luz","ar","fada"],                 "dis": ["som","veneno","fogo"]},
-    "cosmos":   {"adv": ["ar","som"],                        "dis": ["tempo","sombra"]},
-    "fantasma": {"adv": ["psíquico","luta"],                 "dis": ["arcano","metal"]},
-    "dragão":   {"adv": ["metal","arcano"],                  "dis": ["gelo","fada"]},
-    "fada":     {"adv": ["dragão","luta","sombra"],          "dis": ["veneno","metal"]},
-    "psíquico": {"adv": ["luta","fantasma","veneno"],        "dis": ["sombra","inseto"]},
-    "luta":     {"adv": ["metal","gelo","sombra"],           "dis": ["fada","psíquico"]},
-    "inseto":   {"adv": ["psíquico","planta"],               "dis": ["fogo","ar"]},
-    "néon":     {"adv": ["mecânico","sombra"],               "dis": ["nuclear","arcano"]},
-    "nuclear":  {"adv": ["néon","inseto"],                   "dis": ["espírito","terra"]},
-    "espírito": {"adv": ["nuclear","sombra"],                "dis": ["dragão","metal"]},
-    "mecânico": {"adv": ["ar","gelo"],                       "dis": ["néon","nuclear"]},
-    "ventos":   {"adv": ["inseto","fogo"],                   "dis": ["metal","terra"]},
-    "magma":    {"adv": ["gelo","terra","metal"],            "dis": ["água","ventos"]},
-    "arcano":   {"adv": ["fantasma","cosmos"],               "dis": ["dragão","sombra"]},
-    # Tipos especiais de bosses e divinos
-    "molestador":{"adv": ["fofa"],                           "dis": ["fofa"]},
-    "fofa":      {"adv": ["molestador"],                     "dis": ["molestador"]},
-    "oxigénio":  {"adv": ["caos"],                           "dis": ["absoluto"]},
-    "caos":      {"adv": ["absoluto"],                       "dis": ["oxigénio"]},
-    "absoluto":  {"adv": ["oxigénio"],                       "dis": ["caos"]},
-    "deus":      {"adv": [],                                 "dis": []},
-    "???":       {"adv": [],                                 "dis": []},
+    "fogo":      {"adv": ["gelo", "planta"],          "dis": ["terra", "água"]},
+    "água":      {"adv": ["fogo", "gelo"],            "dis": ["planta", "trovão"]},
+    "planta":    {"adv": ["água", "terra"],           "dis": ["fogo", "veneno"]},
+    "terra":     {"adv": ["trovão", "fogo"],          "dis": ["planta", "cristal"]},
+    "ar":        {"adv": ["veneno", "sombra"],        "dis": ["cosmos", "metal"]},
+    "gelo":      {"adv": ["luz", "veneno"],           "dis": ["fogo", "água"]},
+    "trovão":    {"adv": ["água", "som"],             "dis": ["terra", "sombra"]},
+    "sombra":    {"adv": ["cosmos", "trovão"],        "dis": ["luz", "ar"]},
+    "cristal":   {"adv": ["terra", "tempo"],          "dis": ["som"]},
+    "veneno":    {"adv": ["planta", "metal"],         "dis": ["ar", "gelo"]},
+    "som":       {"adv": ["cristal", "metal"],        "dis": ["cosmos", "trovão"]},
+    "luz":       {"adv": ["tempo", "sombra"],         "dis": ["metal", "gelo"]},
+    "tempo":     {"adv": ["cosmos", "trovão"],        "dis": ["luz", "cristal"]},
+    "metal":     {"adv": ["luz", "ar"],               "dis": ["som", "veneno"]},
+    "cosmos":    {"adv": ["ar", "som"],               "dis": ["tempo", "sombra"]},
+    "molestador":{"adv": ["fofa"],                    "dis": ["fofa"]},
+    "fofa":      {"adv": ["molestador"],              "dis": ["molestador"]},
+    "oxigénio":  {"adv": ["caos"],                    "dis": ["absoluto"]},
+    "caos":      {"adv": ["absoluto"],                "dis": ["oxigénio"]},
+    "absoluto":  {"adv": ["oxigénio"],                "dis": ["caos"]},
+    "fantasma":  {"adv": ["psíquico", "luta"],        "dis": ["arcano", "metal"]},
+    "dragão":    {"adv": ["metal", "arcano"],         "dis": ["gelo", "fada"]},
+    "fada":      {"adv": ["dragão", "luta"],          "dis": ["veneno", "metal"]},
+    "psíquico":  {"adv": ["luta", "fantasma"],        "dis": ["sombra", "inseto"]},
+    "luta":      {"adv": ["metal", "gelo"],           "dis": ["fada", "psíquico"]},
+    "inseto":    {"adv": ["psíquico", "planta"],      "dis": ["fogo", "ar"]},
+    "néon":      {"adv": ["mecânico", "sombra"],      "dis": ["nuclear", "arcano"]},
+    "nuclear":   {"adv": ["néon", "inseto"],          "dis": ["espírito", "terra"]},
+    "espírito":  {"adv": ["nuclear", "sombra"],       "dis": ["dragão", "metal"]},
+    "mecânico":  {"adv": ["ar", "gelo"],              "dis": ["néon", "nuclear"]},
+    "ventos":    {"adv": ["inseto", "fogo"],          "dis": ["metal", "terra"]},
+    "magma":     {"adv": ["gelo", "terra"],           "dis": ["água", "ventos"]},
+    "arcano":    {"adv": ["fantasma", "cosmos"],      "dis": ["dragão", "sombra"]},
+    # Tipos sem matchups (bosses finais / divinos genéricos)
+    "deus":      {"adv": [],                          "dis": []},
+    "???":       {"adv": [],                          "dis": []},
 }
 
 
@@ -348,7 +349,7 @@ SHOP_ITEMS = [
     {"id": "balls5",     "n": "Pack Balls",   "e": "🔮", "price": 35,  "desc": "+5 Monster Balls"},
     {"id": "shield",     "n": "Escudo Mágico","e": "🛡️","price": 80,  "desc": "Absorve 40% do próximo dano (boss)"},
     {"id": "xatk",       "n": "X-Ataque",     "e": "💢", "price": 20,  "desc": "+60% dano no próximo ataque"},
-    {"id": "neoncage",   "n": "Gaiola Néon",  "e": "🟩", "price": 160, "desc": "+35% captura em Néon/Mecânico/Nuclear"},
+    {"id": "neoncage",   "n": "Gaiola Néon",  "e": "���", "price": 160, "desc": "+35% captura em Néon/Mecânico/Nuclear"},
 ]
 
 SHOP_INDEX = {s["id"]: s for s in SHOP_ITEMS}
@@ -541,6 +542,31 @@ def get_active_mon(data: dict) -> Optional[dict]:
 # CAPTURA / CHANCE
 # ══════════════════════════════════════════════════════════════
 
+# Bónus de captura por raridade de cada monstro na equipa.
+# Monstros mais raros na equipa aumentam mais a tua chance de captura.
+RARITY_CATCH_BONUS = {
+    "comum":    0.01,
+    "incomum":  0.02,
+    "raro":     0.04,
+    "épico":    0.07,
+    "lendário": 0.10,
+    "mítico":   0.14,
+    "divino":   0.20,
+}
+# Máximo total que a equipa pode adicionar à chance de captura.
+TEAM_CATCH_BONUS_CAP = 0.30
+
+
+def get_team_catch_bonus(data: dict) -> float:
+    """Soma o bónus de raridade de todos os monstros na equipa (até ao teto)."""
+    total = 0.0
+    for mon in data.get("team", []):
+        sp = MON_INDEX.get(mon.get("species", ""), {})
+        rare = sp.get("rare", "comum")
+        total += RARITY_CATCH_BONUS.get(rare, 0.0)
+    return min(TEAM_CATCH_BONUS_CAP, total)
+
+
 def get_catch_chance(wild: dict, data: dict, ball: str = "normal") -> float:
     base = wild.get("catch", 0.5)
     # HP baixo dá bónus (até +20%)
@@ -554,7 +580,9 @@ def get_catch_chance(wild: dict, data: dict, ball: str = "normal") -> float:
     cage_bonus = 0.0
     if data.get("items", {}).get("neoncage", 0) > 0 and wild.get("t") in ("néon", "mecânico", "nuclear"):
         cage_bonus = 0.35
-    return max(0.02, min(0.98, base + hp_bonus + ball_bonus + cage_bonus))
+    # Bónus de equipa: quanto mais raros os teus monstros, maior a chance
+    team_bonus = get_team_catch_bonus(data)
+    return max(0.02, min(0.98, base + hp_bonus + ball_bonus + cage_bonus + team_bonus))
 
 
 def spawn_wild(data: dict) -> dict:
@@ -701,7 +729,7 @@ def embed_team(user: discord.abc.User, data: dict) -> discord.Embed:
     aid = data.get("activeMonId")
     embed = discord.Embed(title=f"🐾 Equipa de {user.display_name}", color=0x5090e0)
     if not team:
-        embed.description = "A tua equipa está vazia. Usa `/cacar` para capturar monstros!"
+        embed.description = "A tua equipa está vazia. Usa `/caçar` para capturar monstros!"
         return embed
     for i, m in enumerate(team, 1):
         refresh_mon_stats(m)
@@ -889,8 +917,18 @@ def embed_battle(data: dict, msg: str = "") -> discord.Embed:
                   f"```\n{hp_bar(pr, 12)}\n```",
             inline=False,
         )
+    else:
+        embed.add_field(
+            name="❤️ Sem monstro ativo",
+            value="Só podes **capturar** ou **fugir** — não tens com quê atacar.",
+            inline=False,
+        )
     chance = get_catch_chance(wild, data)
-    embed.add_field(name="🎯 Chance de captura", value=f"**{int(chance * 100)}%**", inline=True)
+    team_bonus = get_team_catch_bonus(data)
+    team_txt = f"**{int(chance * 100)}%**"
+    if team_bonus > 0:
+        team_txt += f"\n✨ Bónus de equipa: +{int(team_bonus * 100)}%"
+    embed.add_field(name="🎯 Chance de captura", value=team_txt, inline=True)
     embed.add_field(name="🔮 Balls", value=str(data.get("balls", 0)), inline=True)
     if msg:
         embed.add_field(name="📋 Ação", value=msg, inline=False)
@@ -1531,7 +1569,7 @@ async def cmd_start(interaction: discord.Interaction):
     )
     em.add_field(name="💰 Ouro inicial", value="50", inline=True)
     em.add_field(name="🔮 Balls", value="5", inline=True)
-    em.set_footer(text="Começa a tua jornada com /cacar!")
+    em.set_footer(text="Começa a tua jornada com /caçar!")
     await interaction.response.send_message(embed=em)
 
 
@@ -1753,17 +1791,19 @@ async def cmd_usar(interaction: discord.Interaction, item: str):
     await interaction.response.send_message(f"✅ {active['e']} {active.get('species', '?')} — {msg}")
 
 
-@tree.command(name="cacar", description="Encontra um monstro selvagem para capturar.")
+@tree.command(name="caçar", description="Encontra um monstro selvagem para capturar.")
 async def cmd_cacar(interaction: discord.Interaction):
     uid = interaction.user.id
     data = load_save(uid)
     if data.get("inBattle") or data.get("inBossBattle"):
         await interaction.response.send_message("⚔️ Já estás em batalha!", ephemeral=True)
         return
-    active = get_active_mon(data)
-    if not active or not active.get("alive"):
+
+    # Não é necessário ter monstro para caçar — mas os monstros da equipa
+    # aumentam a chance de captura conforme a sua raridade.
+    if data.get("balls", 0) <= 0:
         await interaction.response.send_message(
-            "❌ Precisas de um monstro vivo! Usa `/curar` ou `/ativar`.", ephemeral=True
+            "❌ Sem Monster Balls! Compra em `/loja` antes de caçar.", ephemeral=True
         )
         return
 
@@ -1983,7 +2023,7 @@ async def cmd_ajuda(interaction: discord.Interaction):
         name="🎮 Comandos principais",
         value=(
             "`/start` — começa a aventura\n"
-            "`/cacar` — caça monstros selvagens\n"
+            "`/caçar` — caça monstros selvagens (não precisas de ter monstro vivo!)\n"
             "`/boss [nome?]` — desafia um boss\n"
             "`/desafiar_final` — 🌌 **DEUS ABSOLUTO** (Pokédex completa)\n"
             "`/perfil`, `/equipa`, `/box`, `/pokedex`, `/bosses`\n"
