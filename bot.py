@@ -744,7 +744,7 @@ class BattleView(discord.ui.View):
         if not mon or not mon.get("alive", True):
             self._end_battle(data)
             write_save(self.uid, data)
-            await interaction.response.edit_message(content="Todos os teus monstros estão KO! Usa /curar.", embed=None, view=None)
+            await interaction.response.edit_message(content="O monstro foi derrotado ou perdeste.Usa /curar para curar teu time se necessario", embed=None, view=None)
             return
 
         refresh_mon_stats(mon)
