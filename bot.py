@@ -560,8 +560,13 @@ def get_active_mon(data):
     for m in data.get("team", []):
         if m.get("id") == aid:
             return m
-    if data["team"]:
-        return data["team"][0]
+    team = data.get("team", [])
+    if team:
+        alive = next((m for m in team if m.get("alive", True)), None)
+        chosen = alive or team[0]
+        if chosen.get("id") is not None and data.get("activeMonId") != chosen.get("id"):
+            data["activeMonId"] = chosen.get("id")
+        return chosen
     return None
 
 # ══════════════════════════════════════════════
@@ -613,40 +618,58 @@ def add_topbar(embed, data):
     embed.add_field(name="⭐ Master", value=f"**{data.get('masterball',0)}**", inline=True)
     return embed
 
+def make_stat_chip(label, value):
+    return f"`{label}` **{value}**"
+
 def make_wild_embed(wild, bar, msg="", player_data=None):
     """Embed de batalha selvagem com HUD inspirada no HTML."""
     rare = wild.get("rare", "comum")
     color = RARE_COLOR.get(rare, 0x888888)
 
-    embed = discord.Embed(color=color)
-
-    # Título: emoji grande + nome + raridade
-    embed.title = f"{wild['e']}  {wild['n']}"
-
-    # Tipo + Raridade numa linha — como o HTML tem tipo e raridade separados
-    embed.description = (
-        f"**{type_badge(wild.get('t','?'))}** · {rare_badge(rare)}\n"
-        f"```\n{bar}\n```\n"
-        f"**HP:** {wild.get('hp', '?')}/{wild.get('maxHp', '?')}   **ATK:** {wild.get('atk', '?')}"
+    embed = make_panel_embed(
+        "Monster Hunter RPG",
+        "Painel de batalha selvagem",
+        color,
+        "⚔️"
+    )
+    add_topbar(embed, player_data or {})
+    embed.add_field(
+        name=f"{wild['e']} {wild['n']}",
+        value=(
+            f"{type_badge(wild.get('t','?'))} · {rare_badge(rare)}\n"
+            f"```{bar}```\n"
+            f"{make_stat_chip('HP', f'{wild.get('hp', '?')}/{wild.get('maxHp', '?')}')}  "
+            f"{make_stat_chip('ATK', wild.get('atk', '?'))}"
+        ),
+        inline=False
     )
 
     if msg:
-        embed.add_field(name="📋 Batalha", value=msg, inline=False)
+        embed.add_field(name="📋 Log da Batalha", value=msg, inline=False)
 
     if player_data:
-        add_topbar(embed, player_data)
         mon = get_active_mon(player_data)
         if mon:
             refresh_mon_stats(mon)
             hp_pct_mon = mon["hp"] / max(1, mon["maxHp"])
-            mon_bar = hp_bar(hp_pct_mon, 8)
+            mon_bar = hp_bar(hp_pct_mon, 10)
             alive_icon = "💚" if mon.get("alive", True) else "💀"
+            xp_need = xp_needed(mon.get("level", 1))
+            boost_bits = []
+            if mon.get("hpBoost", 0):
+                boost_bits.append(f"HP +{mon['hpBoost']*10}")
+            if mon.get("atkBoost", 0):
+                boost_bits.append(f"ATK +{mon['atkBoost']*5}")
+            if mon.get("captureBonus", 0):
+                boost_bits.append(f"captura +{int(mon['captureBonus']*100)}%")
+            boost_line = " · ".join(boost_bits) if boost_bits else "Sem bónus extra"
             embed.add_field(
-                name=f"{alive_icon} Teu Monstro — {mon.get('e','')} {mon.get('species', mon.get('n','?'))}",
+                name=f"{alive_icon} {mon.get('e','')} {mon.get('species', mon.get('n','?'))}",
                 value=(
-                    f"Lv.**{mon.get('level',1)}** {tier_stars(mon.get('tier',1))} · {type_badge(mon.get('t','?'))}\n"
-                    f"```\n{mon_bar}\n```\n"
-                    f"**HP:** {mon['hp']}/{mon['maxHp']}   **ATK:** {mon['atkStat']}"
+                    f"**{type_badge(mon.get('t','?'))}** · Lv. **{mon.get('level',1)}** · Tier **{mon.get('tier',1)}**\n"
+                    f"{make_stat_chip('ATK', mon['atkStat'])}  {make_stat_chip('HP', f'{mon['hp']}/{mon['maxHp']}')}\n"
+                    f"```{mon_bar}```\n"
+                    f"`XP` **{mon.get('xp', 0)}/{xp_need}** · {boost_line}"
                 ),
                 inline=False
             )
@@ -656,7 +679,7 @@ def make_wild_embed(wild, bar, msg="", player_data=None):
                 value="Podes usar **Ball** para capturar o teu primeiro monstro. O ataque fica disponível depois.",
                 inline=False
             )
-        embed.set_footer(text="HUD de caça inspirada no HTML")
+        embed.set_footer(text="Ataque com cooldown de 5s · estilo HUD inspirado no HTML")
 
     return embed
 
@@ -784,15 +807,13 @@ def make_shop_embed(page=0):
     items_per_page = 5
     start = page * items_per_page
     shown = SHOP_ITEMS[start:start+items_per_page]
-    lines = []
+    embed = make_panel_embed("Loja", "Painel de compras inspirado no HTML", 0xffd700, "🏪")
     for i in shown:
-        lines.append(f"**{i['e']} {i['n']}** — 💰{i['price']}\n*{i['desc']}*")
-    desc = "\n\n".join(lines)
-    embed = discord.Embed(
-        title="🏪 Loja do Monster Hunter",
-        description=f"Painel de compras estilo HTML\n\n{desc}",
-        color=0xffd700
-    )
+        embed.add_field(
+            name=f"{i['e']} {i['n']}  ·  💰 {i['price']}",
+            value=f"{i['desc']}\n`/comprar {i['id']}`",
+            inline=False
+        )
     total = (len(SHOP_ITEMS)-1)//5+1
     embed.set_footer(text=f"Página {page+1}/{total} · Usa os botões para navegar")
     return embed
@@ -820,11 +841,11 @@ def make_team_embed(data):
         embed.add_field(
             name=f"{prefix}{mon.get('e','❓')} {sp_name}",
             value=(
-                f"{type_badge(mon.get('t','?'))} · {tier_stars(mon.get('tier',1))}\n"
-                f"Lv.**{mon.get('level',1)}** · ATK **{mon.get('atkStat','?')}**\n"
+                f"{type_badge(mon.get('t','?'))} · Tier **{mon.get('tier',1)}**\n"
+                f"Lv. **{mon.get('level',1)}** · ⚔️ **{mon.get('atkStat','?')}**\n"
                 f"{status_icon} `{bar}` {mon['hp']}/{mon['maxHp']}"
             ),
-            inline=True
+            inline=False
         )
 
     gold = data.get("gold", 0)
@@ -845,11 +866,11 @@ def make_box_embed(data):
         embed.add_field(
             name=f"{mon.get('e','❓')} {sp_name}",
             value=(
-                f"Lv.**{mon.get('level',1)}** · {tier_stars(mon.get('tier',1))}\n"
-                f"`{bar}`\n"
-                f"❤️ {mon.get('hp','?')}/{mon.get('maxHp','?')} · ⚔️ {mon.get('atkStat','?')}"
+                f"{type_badge(mon.get('t','?'))} · {rare_badge(mon.get('rare','comum'))}\n"
+                f"Lv. **{mon.get('level',1)}** · Tier **{mon.get('tier',1)}**\n"
+                f"`{bar}` · ❤️ {mon.get('hp','?')}/{mon.get('maxHp','?')} · ⚔️ {mon.get('atkStat','?')}"
             ),
-            inline=True
+            inline=False
         )
     if len(box) > 20:
         embed.set_footer(text=f"Mostrando 20/{len(box)} monstros")
@@ -932,6 +953,12 @@ class BattleView(discord.ui.View):
             if getattr(child, "custom_id", "") == "fight":
                 child.label = f"Atacar ({remaining}s)" if remaining > 0 else "Atacar"
                 child.disabled = remaining > 0 or not can_attack
+            elif getattr(child, "custom_id", "") == "ball":
+                child.label = f"Lançar Ball ({data.get('balls', 0)})"
+                child.disabled = data.get("balls", 0) <= 0
+            elif getattr(child, "custom_id", "") == "masterball":
+                child.label = f"Master Ball ({data.get('masterball', 0)})"
+                child.disabled = data.get("masterball", 0) <= 0
 
     def _end_battle(self, data, reward_balls=False):
         clear_wild_battle_state(data)
@@ -963,6 +990,7 @@ class BattleView(discord.ui.View):
         mon = get_active_mon(data)
         if not mon or not mon.get("alive", True):
             self._sync_buttons(data)
+            write_save(self.uid, data)
             await interaction.response.send_message("❌ Precisas primeiro de capturar ou ativar um monstro para atacar.", ephemeral=True)
             return
 
@@ -2015,6 +2043,20 @@ async def inventory(interaction: discord.Interaction):
     embed = make_panel_embed("Inventário", "Painel de recursos e consumíveis", 0x5090e0, "🎒")
     add_topbar(embed, data)
 
+    mon = get_active_mon(data)
+    if mon:
+        refresh_mon_stats(mon)
+        hp_pct = mon["hp"] / max(1, mon["maxHp"])
+        embed.add_field(
+            name=f"⭐ Monstro Ativo · {mon.get('e','❓')} {mon.get('species', mon.get('n','?'))}",
+            value=(
+                f"{type_badge(mon.get('t','?'))} · Lv. **{mon.get('level',1)}** · Tier **{mon.get('tier',1)}**\n"
+                f"`{hp_bar(hp_pct, 10)}`\n"
+                f"❤️ **{mon['hp']}/{mon['maxHp']}** · ⚔️ **{mon['atkStat']}**"
+            ),
+            inline=False
+        )
+
     items = data.get("items", {})
     item_map = {i["id"]: i for i in SHOP_ITEMS}
     item_lines = []
@@ -2023,7 +2065,7 @@ async def inventory(interaction: discord.Interaction):
             info = item_map.get(iid, {"e":"📦","n":iid})
             item_lines.append(f"{info['e']} **{info['n']}** × {qty}")
     if item_lines:
-        embed.add_field(name="🧪 Itens", value="\n".join(item_lines), inline=False)
+        embed.add_field(name="🧪 Itens", value="\n".join(item_lines[:18]), inline=False)
     else:
         embed.add_field(name="🧪 Itens", value="*Nenhum item*", inline=False)
 
@@ -2034,17 +2076,7 @@ async def inventory(interaction: discord.Interaction):
     else:
         embed.add_field(name="🪨 Materiais", value="*Nenhum material*", inline=False)
 
-    mon = get_active_mon(data)
-    if mon:
-        refresh_mon_stats(mon)
-        embed.add_field(
-            name="⭐ Monstro Ativo",
-            value=(
-                f"{mon.get('e','❓')} **{mon.get('species', mon.get('n','?'))}**\n"
-                f"{type_badge(mon.get('t','?'))} · Lv.**{mon.get('level',1)}** {tier_stars(mon.get('tier',1))}"
-            ),
-            inline=False
-        )
+    embed.set_footer(text="HUD de inventário inspirada no HTML")
 
     await interaction.response.send_message(embed=embed)
 
@@ -2077,15 +2109,20 @@ async def pokedex(interaction: discord.Interaction):
     complete = progress >= total
     final_done = "???" in bosses or "Leonking" in bosses
 
-    embed = discord.Embed(
-        title=f"📖 Pokédex — {progress}/{total} entradas",
-        description=(
-            f"**{pct}%** completado · 👹 {len([b for b in bosses if b not in ('???','Leonking')])}/{len([x for x in BOSSES if x.get('special')!='final_boss'])} bosses\n"
-            + ("🌟 **POKÉDEX COMPLETA!** O botão abaixo desbloqueia o DEUS ABSOLUTO!" if complete and not final_done else "")
-            + ("\n👑 **Derrotaste o DEUS ABSOLUTO LEONKING!**" if final_done else "")
+    boss_total = len([x for x in BOSSES if x.get('special') != 'final_boss'])
+    boss_done = len([b for b in bosses if b not in ('???', 'Leonking')])
+    embed = make_panel_embed(
+        "Pokédex",
+        (
+            f"Progresso global: **{progress}/{total}** · **{pct}%**\n"
+            f"Bosses: **{boss_done}/{boss_total}**"
+            + ("\n🌟 **POKÉDEX COMPLETA!** O botão abaixo desbloqueia o boss final." if complete and not final_done else "")
+            + ("\n👑 **Leonking já foi derrotado!**" if final_done else "")
         ),
-        color=0xffd700 if complete else 0xffd700
+        0xffd700,
+        "📖"
     )
+    add_topbar(embed, data)
 
     rare_lines = []
     for rare in ["comum","incomum","raro","épico","lendário","mítico","divino","Divino"]:
@@ -2093,7 +2130,7 @@ async def pokedex(interaction: discord.Interaction):
         if count > 0:
             rare_lines.append(f"{rare_badge(rare)}: **{count}**")
     if rare_lines:
-        embed.add_field(name="Por Raridade", value="\n".join(rare_lines), inline=True)
+        embed.add_field(name="Por Raridade", value="\n".join(rare_lines), inline=False)
 
     if bosses:
         embed.add_field(
@@ -2103,6 +2140,13 @@ async def pokedex(interaction: discord.Interaction):
         )
 
     if caught:
+        discovered = []
+        for nm in caught[:24]:
+            sp = MON_INDEX.get(nm,{})
+            discovered.append(f"{sp.get('e','❓')} {nm[:10]}")
+        rows = [" · ".join(discovered[i:i+4]) for i in range(0, len(discovered), 4)]
+        embed.add_field(name="🧩 Entradas Descobertas", value="\n".join(rows[:6]), inline=False)
+
         last5 = caught[-5:]
         last_names = []
         for nm in reversed(last5):
@@ -2296,15 +2340,20 @@ async def ranked_cmd(interaction: discord.Interaction):
     total = wins + losses
     wr = int(wins/total*100) if total > 0 else 0
 
-    embed = discord.Embed(
-        title=f"{rank['icon']} {name}",
-        description=(
-            f"# {rank['label']}\n"
-            f"**ELO:** {elo}\n\n"
-            f"🏆 **{wins}** vitórias · 💀 **{losses}** derrotas\n"
-            f"📊 Win rate: **{wr}%**"
+    embed = make_panel_embed(
+        "Ranked",
+        f"{rank['icon']} **{name}**\nLiga atual: **{rank['label']}**",
+        rank["color"],
+        "🏆"
+    )
+    add_topbar(embed, data)
+    embed.add_field(
+        name="📊 Resumo",
+        value=(
+            f"{make_stat_chip('ELO', elo)}  {make_stat_chip('V', wins)}  "
+            f"{make_stat_chip('D', losses)}  {make_stat_chip('WR', f'{wr}%')}"
         ),
-        color=rank["color"]
+        inline=False
     )
 
     friends = data.get("friendScores", {})
@@ -2317,11 +2366,18 @@ async def ranked_cmd(interaction: discord.Interaction):
             marker = " ← **Tu**" if p.get("name")==name and p.get("elo")==elo else ""
             lb_lines.append(f"**#{i+1}** {r['icon']} {p['name']} — ELO **{p['elo']}**{marker}")
         embed.add_field(name="🏆 Leaderboard de Amigos", value="\n".join(lb_lines), inline=False)
+    else:
+        embed.add_field(
+            name="🏆 Leaderboard de Amigos",
+            value="Ainda não tens amigos importados. Usa `/ranked-import` com um código `MHRPG:`.",
+            inline=False
+        )
 
     import base64
     score_data = {"id":str(uid),"name":name,"elo":elo,"wins":wins,"losses":losses,"ts":int(time.time())}
     code = "MHRPG:" + base64.b64encode(json.dumps(score_data).encode()).decode()
     embed.add_field(name="📋 O teu Código de Pontuação", value=f"`{code[:60]}...`\nUsa `/ranked-import` para adicionar amigos", inline=False)
+    embed.set_footer(text="Painel ranked inspirado no HTML")
     await interaction.response.send_message(embed=embed)
 
 @tree.command(name="ranked-import", description="Importa a pontuação de um amigo")
