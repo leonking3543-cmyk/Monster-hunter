@@ -603,6 +603,16 @@ def tier_stars(tier: int) -> str:
     stars = ["", "★", "★★", "★★★", "★★★★", "★★★★★"]
     return stars[min(tier, 5)]
 
+def make_panel_embed(title, subtitle="", color=0xffd700, accent="✨"):
+    embed = discord.Embed(title=f"{accent} {title}", description=subtitle, color=color)
+    return embed
+
+def add_topbar(embed, data):
+    embed.add_field(name="💰 Ouro", value=f"**{data.get('gold',0)}**", inline=True)
+    embed.add_field(name="🔮 Balls", value=f"**{data.get('balls',0)}**", inline=True)
+    embed.add_field(name="⭐ Master", value=f"**{data.get('masterball',0)}**", inline=True)
+    return embed
+
 def make_wild_embed(wild, bar, msg="", player_data=None):
     """Embed de batalha selvagem com HUD inspirada no HTML."""
     rare = wild.get("rare", "comum")
@@ -624,6 +634,7 @@ def make_wild_embed(wild, bar, msg="", player_data=None):
         embed.add_field(name="📋 Batalha", value=msg, inline=False)
 
     if player_data:
+        add_topbar(embed, player_data)
         mon = get_active_mon(player_data)
         if mon:
             refresh_mon_stats(mon)
@@ -639,10 +650,13 @@ def make_wild_embed(wild, bar, msg="", player_data=None):
                 ),
                 inline=False
             )
-        balls = player_data.get("balls", 0)
-        master = player_data.get("masterball", 0)
-        gold = player_data.get("gold", 0)
-        embed.set_footer(text=f"🔮 {balls} Balls  ·  ⭐ {master} Master  ·  💰 {gold} Ouro")
+        else:
+            embed.add_field(
+                name="⚔️ Sem Monstro Ativo",
+                value="Podes usar **Ball** para capturar o teu primeiro monstro. O ataque fica disponível depois.",
+                inline=False
+            )
+        embed.set_footer(text="HUD de caça inspirada no HTML")
 
     return embed
 
@@ -774,7 +788,11 @@ def make_shop_embed(page=0):
     for i in shown:
         lines.append(f"**{i['e']} {i['n']}** — 💰{i['price']}\n*{i['desc']}*")
     desc = "\n\n".join(lines)
-    embed = discord.Embed(title="🛒 Loja do Monster Hunter", description=desc, color=0xffd700)
+    embed = discord.Embed(
+        title="🏪 Loja do Monster Hunter",
+        description=f"Painel de compras estilo HTML\n\n{desc}",
+        color=0xffd700
+    )
     total = (len(SHOP_ITEMS)-1)//5+1
     embed.set_footer(text=f"Página {page+1}/{total} · Usa os botões para navegar")
     return embed
@@ -784,10 +802,8 @@ def make_team_embed(data):
     team = data.get("team", [])
     active_id = data.get("activeMonId")
 
-    embed = discord.Embed(
-        title="🐾 A Tua Equipa",
-        color=0xffd700
-    )
+    embed = make_panel_embed("A Tua Equipa", "Estado atual da equipa ativa", 0xffd700, "🐾")
+    add_topbar(embed, data)
 
     for i, mon in enumerate(team, 1):
         refresh_mon_stats(mon)
@@ -815,6 +831,28 @@ def make_team_embed(data):
     balls = data.get("balls", 0)
     caught = len(data.get("caught", []))
     embed.set_footer(text=f"💰 {gold}  ·  🔮 {balls} balls  ·  📖 {caught}/{len(MONS)} capturados")
+    return embed
+
+def make_box_embed(data):
+    box = data.get("box", [])
+    embed = make_panel_embed("Box de Monstros", f"Armazenamento estilo HTML · **{len(box)}** monstro(s)", 0x5090e0, "📦")
+    add_topbar(embed, data)
+    for mon in box[:20]:
+        refresh_mon_stats(mon)
+        sp_name = mon.get("species", mon.get("n","?"))
+        hp_pct = mon["hp"] / max(1, mon["maxHp"])
+        bar = hp_bar(hp_pct, 6)
+        embed.add_field(
+            name=f"{mon.get('e','❓')} {sp_name}",
+            value=(
+                f"Lv.**{mon.get('level',1)}** · {tier_stars(mon.get('tier',1))}\n"
+                f"`{bar}`\n"
+                f"❤️ {mon.get('hp','?')}/{mon.get('maxHp','?')} · ⚔️ {mon.get('atkStat','?')}"
+            ),
+            inline=True
+        )
+    if len(box) > 20:
+        embed.set_footer(text=f"Mostrando 20/{len(box)} monstros")
     return embed
 
 def make_boss_start_embed(boss, mon, data):
@@ -888,10 +926,12 @@ class BattleView(discord.ui.View):
 
     def _sync_buttons(self, data):
         remaining = get_remaining_attack_cooldown(data)
+        mon = get_active_mon(data)
+        can_attack = bool(mon and mon.get("alive", True))
         for child in self.children:
             if getattr(child, "custom_id", "") == "fight":
                 child.label = f"Atacar ({remaining}s)" if remaining > 0 else "Atacar"
-                child.disabled = remaining > 0
+                child.disabled = remaining > 0 or not can_attack
 
     def _end_battle(self, data, reward_balls=False):
         clear_wild_battle_state(data)
@@ -922,9 +962,8 @@ class BattleView(discord.ui.View):
 
         mon = get_active_mon(data)
         if not mon or not mon.get("alive", True):
-            self._end_battle(data)
-            write_save(self.uid, data)
-            await interaction.response.edit_message(content="O monstro foi derrotado!/ou perdeste.Usa /curar.", embed=None, view=None)
+            self._sync_buttons(data)
+            await interaction.response.send_message("❌ Precisas primeiro de capturar ou ativar um monstro para atacar.", ephemeral=True)
             return
 
         refresh_mon_stats(mon)
@@ -1763,12 +1802,11 @@ async def hunt(interaction: discord.Interaction):
         await interaction.response.send_message("⚔️ Já estás em batalha! Termina primeiro a batalha atual.", ephemeral=True); return
 
     mon = get_active_mon(data)
-    if not mon or not mon.get("alive", True):
-        await interaction.response.send_message("❌ Precisas de um monstro vivo! Usa `/curar` ou `/ativar`.", ephemeral=True); return
+    has_living_mon = bool(mon and mon.get("alive", True))
 
     queued_name = data.get("pendingBoss") or data.get("bossQueue")
     queued_boss = BOSS_INDEX.get(queued_name) if queued_name else None
-    if queued_boss:
+    if queued_boss and has_living_mon:
         data["pendingBoss"] = None
         data["bossQueue"] = None
         _start_boss_battle(data, queued_boss, mon)
@@ -1779,7 +1817,7 @@ async def hunt(interaction: discord.Interaction):
 
     repel_until = data.get("bossRepelUntil", 0)
     repel_active = repel_until and repel_until > time.time()
-    if not repel_active and data.get("battles", 0) > 0 and random.random() < 0.10:
+    if has_living_mon and not repel_active and data.get("battles", 0) > 0 and random.random() < 0.10:
         boss = roll_random_boss(data)
         if boss:
             queue_boss(data, boss)
@@ -1815,11 +1853,13 @@ async def hunt(interaction: discord.Interaction):
 @tree.command(name="equipa", description="Vê a tua equipa de monstros")
 async def team_cmd(interaction: discord.Interaction):
     uid = interaction.user.id
-    data = load_save(uid)
+    data = load_clean_save(uid)
     team = data.get("team", [])
 
     if not team:
-        await interaction.response.send_message("😔 Ainda não tens monstros! Usa `/caçar` para capturar o teu primeiro.", ephemeral=True)
+        embed = make_panel_embed("A Tua Equipa", "Ainda não tens monstros. Usa `/caçar` e lança uma **Ball** para capturar o primeiro.", 0xffd166, "😔")
+        add_topbar(embed, data)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
         return
 
     embed = make_team_embed(data)
@@ -1828,44 +1868,27 @@ async def team_cmd(interaction: discord.Interaction):
 @tree.command(name="box", description="Vê a tua box de monstros")
 async def box_cmd(interaction: discord.Interaction):
     uid = interaction.user.id
-    data = load_save(uid)
+    data = load_clean_save(uid)
     box = data.get("box", [])
 
     if not box:
-        await interaction.response.send_message("📦 A tua box está vazia!", ephemeral=True); return
+        embed = make_panel_embed("Box de Monstros", "A tua box está vazia por agora.", 0x5090e0, "📦")
+        add_topbar(embed, data)
+        await interaction.response.send_message(embed=embed, ephemeral=True); return
 
-    embed = discord.Embed(
-        title="📦 Box de Monstros",
-        description=f"**{len(box)}** monstro(s) na box",
-        color=0x5090e0
-    )
-    for mon in box[:20]:
-        refresh_mon_stats(mon)
-        sp_name = mon.get("species", mon.get("n","?"))
-        hp_pct = mon["hp"] / max(1, mon["maxHp"])
-        bar = hp_bar(hp_pct, 6)
-        embed.add_field(
-            name=f"{mon.get('e','❓')} {sp_name}",
-            value=(
-                f"Lv.**{mon.get('level',1)}** · T{tier_stars(mon.get('tier',1))}\n"
-                f"{bar}\n"
-                f"❤️{mon.get('maxHp','?')} · ⚔️{mon.get('atkStat','?')}"
-            ),
-            inline=True
-        )
-    if len(box) > 20:
-        embed.set_footer(text=f"Mostrando 20/{len(box)} monstros")
-    await interaction.response.send_message(embed=embed)
+    await interaction.response.send_message(embed=make_box_embed(data))
 
 @tree.command(name="ativar", description="Define o teu monstro ativo pelo número na equipa (1-6)")
 @app_commands.describe(posicao="Posição na equipa (1-6)")
 async def set_active(interaction: discord.Interaction, posicao: int):
     uid = interaction.user.id
-    data = load_save(uid)
+    data = load_clean_save(uid)
     team = data.get("team", [])
 
     if not 1 <= posicao <= len(team):
-        await interaction.response.send_message(f"❌ Posição inválida. A tua equipa tem **{len(team)}** monstros.", ephemeral=True); return
+        embed = make_panel_embed("Posição Inválida", f"A tua equipa tem **{len(team)}** monstro(s). Captura mais em `/caçar`.", 0xe74c3c, "❌")
+        add_topbar(embed, data)
+        await interaction.response.send_message(embed=embed, ephemeral=True); return
 
     mon = team[posicao - 1]
     data["activeMonId"] = mon["id"]
@@ -1886,11 +1909,13 @@ async def set_active(interaction: discord.Interaction, posicao: int):
 @app_commands.describe(tipo="Tipo de poção: poção, superpoção, megapoção, revive, maxrevive")
 async def heal(interaction: discord.Interaction, tipo: str = "poção"):
     uid = interaction.user.id
-    data = load_save(uid)
+    data = load_clean_save(uid)
     mon = get_active_mon(data)
 
     if not mon:
-        await interaction.response.send_message("❌ Sem monstro ativo!", ephemeral=True); return
+        embed = make_panel_embed("Sem Monstro Ativo", "Usa `/caçar` para capturar um monstro ou `/ativar` para escolher um da equipa.", 0xe74c3c, "❌")
+        add_topbar(embed, data)
+        await interaction.response.send_message(embed=embed, ephemeral=True); return
 
     mapa = {"poção":"potion","superpoção":"superpotion","megapoção":"megapotion",
             "hyperpoção":"hyperpotion","hyper":"hyperpotion",
@@ -1987,12 +2012,8 @@ async def inventory(interaction: discord.Interaction):
     uid = interaction.user.id
     data = load_clean_save(uid)
 
-    embed = discord.Embed(title="🎒 Inventário", color=0x5090e0)
-
-    # Topbar como no HTML
-    embed.add_field(name="💰 Ouro", value=f"**{data.get('gold',0)}**", inline=True)
-    embed.add_field(name="🔮 Balls", value=f"**{data.get('balls',0)}**", inline=True)
-    embed.add_field(name="⭐ Master Balls", value=f"**{data.get('masterball',0)}**", inline=True)
+    embed = make_panel_embed("Inventário", "Painel de recursos e consumíveis", 0x5090e0, "🎒")
+    add_topbar(embed, data)
 
     items = data.get("items", {})
     item_map = {i["id"]: i for i in SHOP_ITEMS}
@@ -2012,6 +2033,18 @@ async def inventory(interaction: discord.Interaction):
         embed.add_field(name="🪨 Materiais", value="\n".join(mat_lines), inline=False)
     else:
         embed.add_field(name="🪨 Materiais", value="*Nenhum material*", inline=False)
+
+    mon = get_active_mon(data)
+    if mon:
+        refresh_mon_stats(mon)
+        embed.add_field(
+            name="⭐ Monstro Ativo",
+            value=(
+                f"{mon.get('e','❓')} **{mon.get('species', mon.get('n','?'))}**\n"
+                f"{type_badge(mon.get('t','?'))} · Lv.**{mon.get('level',1)}** {tier_stars(mon.get('tier',1))}"
+            ),
+            inline=False
+        )
 
     await interaction.response.send_message(embed=embed)
 
@@ -2218,7 +2251,7 @@ async def use_item(interaction: discord.Interaction, item: str):
 @app_commands.describe(acao="'box' para guardar da equipa, 'equipa' para trazer da box", nome="Nome do monstro")
 async def swap(interaction: discord.Interaction, acao: str, nome: str):
     uid = interaction.user.id
-    data = load_save(uid)
+    data = load_clean_save(uid)
 
     if acao.lower() == "box":
         team = data.get("team", [])
@@ -2253,7 +2286,7 @@ async def swap(interaction: discord.Interaction, acao: str, nome: str):
 @tree.command(name="ranked", description="Vê o teu perfil ranked e leaderboard de amigos")
 async def ranked_cmd(interaction: discord.Interaction):
     uid = interaction.user.id
-    data = load_save(uid)
+    data = load_clean_save(uid)
 
     elo = data.get("rankedElo", 1200)
     rank = get_rank_info(elo)
@@ -2296,7 +2329,7 @@ async def ranked_cmd(interaction: discord.Interaction):
 async def ranked_import(interaction: discord.Interaction, codigo: str):
     import base64
     uid = interaction.user.id
-    data = load_save(uid)
+    data = load_clean_save(uid)
 
     try:
         if not codigo.startswith("MHRPG:"):
@@ -2318,7 +2351,7 @@ async def ranked_import(interaction: discord.Interaction, codigo: str):
 @tree.command(name="rebirth", description="Faz Rebirth (custa 10.000 💰) — reinicia com bónus permanente!")
 async def rebirth(interaction: discord.Interaction):
     uid = interaction.user.id
-    data = load_save(uid)
+    data = load_clean_save(uid)
 
     if data.get("gold", 0) < 10000:
         await interaction.response.send_message(f"❌ Precisas de 💰**10.000** para Rebirth. Tens apenas 💰**{data.get('gold',0)}**.", ephemeral=True); return
@@ -2351,7 +2384,7 @@ async def rebirth(interaction: discord.Interaction):
 @tree.command(name="perfil", description="Vê o teu perfil completo")
 async def profile(interaction: discord.Interaction):
     uid = interaction.user.id
-    data = load_save(uid)
+    data = load_clean_save(uid)
 
     caught = data.get("caught", [])
     bosses_def = data.get("bossDefeated", [])
@@ -2360,15 +2393,15 @@ async def profile(interaction: discord.Interaction):
     rank = get_rank_info(elo)
     rb = data.get("rebirthCount", 0)
 
-    embed = discord.Embed(
-        title=f"👤 {data.get('playerName', interaction.user.display_name)}",
-        color=0xffd700
+    embed = make_panel_embed(
+        data.get('playerName', interaction.user.display_name),
+        f"{rank['icon']} Perfil estilo HUD",
+        0xffd700,
+        "👤"
     )
     embed.set_thumbnail(url=interaction.user.display_avatar.url)
 
-    # Stats principais — como o topbar do HTML
-    embed.add_field(name="💰 Ouro", value=f"**{data.get('gold',0)}**", inline=True)
-    embed.add_field(name="🔮 Balls", value=f"**{data.get('balls',0)}**", inline=True)
+    add_topbar(embed, data)
     embed.add_field(name="🌀 Rebirths", value=f"**{rb}**", inline=True)
     embed.add_field(name="📖 Pokédex", value=f"**{len(caught)}/{len(MONS)}**", inline=True)
     embed.add_field(name="👹 Bosses", value=f"**{len(bosses_def)}/{len(BOSSES)}**", inline=True)
@@ -2466,7 +2499,7 @@ async def set_name(interaction: discord.Interaction, nome: str):
     if len(nome) < 2 or len(nome) > 24:
         await interaction.response.send_message("❌ Nome deve ter entre 2 e 24 caracteres.", ephemeral=True); return
     uid = interaction.user.id
-    data = load_save(uid)
+    data = load_clean_save(uid)
     data["playerName"] = nome
     write_save(uid, data)
     await interaction.response.send_message(f"✅ Nome definido: **{nome}**! Já apareces no leaderboard.")
