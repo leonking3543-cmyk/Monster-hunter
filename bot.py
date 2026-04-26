@@ -541,7 +541,7 @@ def make_wild_embed(wild,data,msg=""):
             value=f"{type_badge(mon.get('t','?'))}\n❤️ **{mon['hp']}/{mon['maxHp']}** · ⚔️ **{mon.get('atkStat','?')}**\n{mbar}\n{cd_txt}{penalty_txt}",inline=False)
     else:
         embed.add_field(name="⚔️ Sem Monstro Ativo",value="Usa 🔮 Ball para capturar o teu primeiro monstro!",inline=False)
-    enemy_hits=data.get("enemyHits",0)
+        enemy_hits=data.get("enemyHits",0)
     max_hits=3 if is_nightmare_mode(data) else 5
     footer=f"⚔️ Lutar tem cooldown 5s · 🐾 Monster Fight disponível · ⚠️ Inimigo ataca a cada 10s ({enemy_hits}/{max_hits} ataques para fugir) · 🏃 Fugir"
     embed.set_footer(text=footer)
@@ -711,19 +711,16 @@ tree=bot.tree
 class BattleView(discord.ui.View):
     def __init__(self,uid,timeout=180):
         super().__init__(timeout=timeout); self.uid=uid; self._sync()
-    def _sync(self):
+        def _sync(self):
         data=load_clean_save(self.uid)
         cd=max(0,int(math.ceil(data.get("attackCooldownUntil",0)-time.time())))
         mon=get_active_mon(data)
-        can_fight=True  # Lutar sempre disponível (jogador ataca sozinho)
-        can_monster=bool(mon and mon.get("alive",True))  # Monster Fight só com monstro vivo
-        
-        # Atualizar labels dos botões
+        can_monster=bool(mon and mon.get("alive",True))
         for c in self.children:
             cid=getattr(c,"custom_id","")
             if cid=="fight_mon":
                 c.label=f"⚔️ Lutar ({cd}s)" if cd>0 else "⚔️ Lutar"
-                c.disabled=(cd>0)  # Só bloqueia pelo cooldown, não pelo monstro
+                c.disabled=(cd>0)
             elif cid=="throw_ball":
                 c.label=f"🔮 Ball ({data.get('balls',0)})"
                 c.disabled=(data.get("balls",0)<=0)
@@ -732,9 +729,7 @@ class BattleView(discord.ui.View):
                 c.disabled=(data.get("masterball",0)<=0)
             elif cid=="monster_fight":
                 c.label="🐾 Monster Fight"
-                c.disabled=not can_monster  # Só ativo com monstro vivo
-        
-        # Sistema de ataques automáticos do inimigo a cada 10 segundos
+                c.disabled=not can_monster
         if data.get("inBattle") and data.get("wild"):
             now=time.time()
             last_atk=data.get("lastEnemyAtk",0)
@@ -751,8 +746,8 @@ class BattleView(discord.ui.View):
                         data["wild"]=None
                         clear_wild_state(data)
                 write_save(self.uid,data)
-        
         return data
+        
     async def _chk(self,interaction):
         data=load_clean_save(self.uid)
         if not data.get("inBattle") or not data.get("wild"):
