@@ -541,9 +541,10 @@ def make_wild_embed(wild,data,msg=""):
             value=f"{type_badge(mon.get('t','?'))}\n❤️ **{mon['hp']}/{mon['maxHp']}** · ⚔️ **{mon.get('atkStat','?')}**\n{mbar}\n{cd_txt}{penalty_txt}",inline=False)
     else:
         embed.add_field(name="⚔️ Sem Monstro Ativo",value="Usa 🔮 Ball para capturar o teu primeiro monstro!",inline=False)
-        enemy_hits=data.get("enemyHits",0)
-    max_hits=3 if is_nightmare_mode(data) else 5
-    footer=f"⚔️ Lutar tem cooldown 5s · 🐾 Monster Fight disponível · ⚠️ Inimigo ataca a cada 10s ({enemy_hits}/{max_hits} ataques para fugir) · 🏃 Fugir"
+    
+    enemy_hits = data.get("enemyHits", 0)
+    max_hits = 3 if is_nightmare_mode(data) else 5
+    footer = f"⚔️ Lutar tem cooldown 5s · 🐾 Monster Fight disponível · ⚠️ Inimigo ataca a cada 10s ({enemy_hits}/{max_hits} ataques para fugir) · 🏃 Fugir"
     embed.set_footer(text=footer)
     return embed
 
