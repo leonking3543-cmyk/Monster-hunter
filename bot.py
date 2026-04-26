@@ -761,7 +761,7 @@ class BattleView(discord.ui.View):
             return None
         return data
 
-        @discord.ui.button(label="⚔️ Lutar",style=discord.ButtonStyle.danger,custom_id="fight_mon",row=0)
+           @discord.ui.button(label="⚔️ Lutar",style=discord.ButtonStyle.danger,custom_id="fight_mon",row=0)
     async def fight_mon(self,interaction:discord.Interaction,button:discord.ui.Button):
         if interaction.user.id!=self.uid: await interaction.response.send_message("❌ Não é a tua batalha!",ephemeral=True); return
         data=await self._chk(interaction)
@@ -772,9 +772,9 @@ class BattleView(discord.ui.View):
         wild=data["wild"]
         mon=get_active_mon(data)
         
-        # Jogador ataca sozinho (dano base sem monstro)
+        # Jogador ataca sozinho (sem monstro)
         if not mon or not mon.get("alive",True):
-            dmg=max(1,int(8+random.random()*6))  # Dano base: 8-14
+            dmg=max(1,int(8+random.random()*6))
             ret=max(1,int(wild.get("atk",5)*(0.5+random.random()*0.45)))
             wild["hp"]=max(0,wild["hp"]-dmg)
             data["attackCooldownUntil"]=time.time()+5.0
@@ -808,8 +808,6 @@ class BattleView(discord.ui.View):
         gainXp(mon,8+int(wild.get("atk",5)*1.6),data)
         data["attackCooldownUntil"]=time.time()+5.0
         lines=[]
-        hint_at=get_type_hint_text(effect)
-        hint_rt=get_type_hint_text(rteffect)
         if at>1: lines.append(f"⚡ **Super eficaz!** {mon.get('e','')} causou **{dmg}** dano!")
         elif at<1: lines.append(f"💧 *Pouco eficaz...* {mon.get('e','')} causou **{dmg}** dano.")
         else: lines.append(f"⚔️ {mon.get('e','')} **{mon.get('species',mon.get('n','?'))}** causou **{dmg}** dano!")
