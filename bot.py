@@ -541,7 +541,7 @@ def make_wild_embed(wild,data,msg=""):
             value=f"{type_badge(mon.get('t','?'))}\n❤️ **{mon['hp']}/{mon['maxHp']}** · ⚔️ **{mon.get('atkStat','?')}**\n{mbar}\n{cd_txt}{penalty_txt}",inline=False)
     else:
         embed.add_field(name="⚔️ Sem Monstro Ativo",value="Usa 🔮 Ball para capturar o teu primeiro monstro!",inline=False)
-        enemy_hits=data.get("enemyHits",0)
+    enemy_hits=data.get("enemyHits",0)
     max_hits=3 if is_nightmare_mode(data) else 5
     footer=f"⚔️ Lutar tem cooldown 5s · 🐾 Monster Fight disponível · ⚠️ Inimigo ataca a cada 10s ({enemy_hits}/{max_hits} ataques para fugir) · 🏃 Fugir"
     embed.set_footer(text=footer)
@@ -709,9 +709,9 @@ tree=bot.tree
 # ══════════════════════════════════════════════
 
 class BattleView(discord.ui.View):
-    def __init__(self,uid,timeout=180):
+ def __init__(self,uid,timeout=180):
         super().__init__(timeout=timeout); self.uid=uid; self._sync()
-        def _sync(self):
+    def _sync(self):
         data=load_clean_save(self.uid)
         cd=max(0,int(math.ceil(data.get("attackCooldownUntil",0)-time.time())))
         mon=get_active_mon(data)
@@ -756,7 +756,7 @@ class BattleView(discord.ui.View):
             return None
         return data
 
-           @discord.ui.button(label="⚔️ Lutar",style=discord.ButtonStyle.danger,custom_id="fight_mon",row=0)
+ @discord.ui.button(label="⚔️ Lutar",style=discord.ButtonStyle.danger,custom_id="fight_mon",row=0)
     async def fight_mon(self,interaction:discord.Interaction,button:discord.ui.Button):
         if interaction.user.id!=self.uid: await interaction.response.send_message("❌ Não é a tua batalha!",ephemeral=True); return
         data=await self._chk(interaction)
