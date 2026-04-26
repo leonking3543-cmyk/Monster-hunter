@@ -536,6 +536,7 @@ def make_wild_embed(wild,data,msg=""):
         embed.add_field(name=f"{alive} {mon.get('e','')} **{sp}** — Lv.{mon.get('level',1)} {tier_stars(mon.get('tier',1))}",
             value=f"{type_badge(mon.get('t','?'))}\n❤️ **{mon['hp']}/{mon['maxHp']}** · ⚔️ **{mon.get('atkStat','?')}**\n{mbar}\n{cd_txt}",inline=False)
     else:
+        embed.add_field(name="⚔️ Sem Monstro Ativo",value="Usa 🔮 Ball para capturar o teu primeiro monstro!",inline=False)
     enemy_hits = data.get("enemyHits", 0)
     max_hits = 3 if is_nightmare_mode(data) else 5
     embed.set_footer(text=f"⚔️ Lutar tem cooldown 5s · 🐾 Monster Fight disponível · ⚠️ Inimigo ataca a cada 10s ({enemy_hits}/{max_hits} ataques para fugir) · 🏃 Fugir")
@@ -724,10 +725,10 @@ class BattleView(discord.ui.View):
             elif cid=="throw_master":
                 c.label=f"⭐ Master ({data.get('masterball',0)})"
                 c.disabled=(data.get("masterball",0)<=0)
-            elif cid=="monster_fight":
+        elif cid=="monster_fight":
                 c.label="🐾 Monster Fight"
                 c.disabled=not can_monster
-if data.get("inBattle") and data.get("wild"):
+        if data.get("inBattle") and data.get("wild"):
             now = time.time()
             last_atk = data.get("lastEnemyAtk", 0)
             if now - last_atk >= 10:
