@@ -542,9 +542,9 @@ def make_wild_embed(wild,data,msg=""):
     else:
         embed.add_field(name="⚔️ Sem Monstro Ativo",value="Usa 🔮 Ball para capturar o teu primeiro monstro!",inline=False)
     enemy_hits=data.get("enemyHits",0)
-max_hits=3 if is_nightmare_mode(data) else 5
-footer=f"⚔️ Lutar tem cooldown 5s · 🐾 Monster Fight disponível · ⚠️ Inimigo ataca a cada 10s ({enemy_hits}/{max_hits} ataques para fugir) · 🏃 Fugir"
-embed.set_footer(text=footer)
+    max_hits=3 if is_nightmare_mode(data) else 5
+    footer=f"⚔️ Lutar tem cooldown 5s · 🐾 Monster Fight disponível · ⚠️ Inimigo ataca a cada 10s ({enemy_hits}/{max_hits} ataques para fugir) · 🏃 Fugir"
+    embed.set_footer(text=footer)
     return embed
 
 def make_boss_embed(data,msg=""):
@@ -720,48 +720,26 @@ class BattleView(discord.ui.View):
             if cid=="fight_mon": c.label=f"⚔️ Lutar ({cd}s)" if cd>0 else "⚔️ Lutar"; c.disabled=cd>0 or not can
             elif cid=="throw_ball": c.label=f"🔮 Ball ({data.get('balls',0)})"; c.disabled=data.get("balls",0)<=0
             elif cid=="throw_master": c.label=f"⭐ Master ({data.get('masterball',0)})"; c.disabled=data.get("masterball",0)<=0
-            elif cid=="monster_fight": 
-    c.label="🐾 Monster Fight"
-    c.disabled=not can
-            # Sistema de ataques automáticos do inimigo
-if data.get("inBattle") and data.get("wild"):
-    now=time.time()
-    last_atk=data.get("lastEnemyAtk",0)
-    # A cada 10 segundos, o inimigo ataca
-    if now-last_atk>=10:
-        mon=get_active_mon(data)
-        wild=data["wild"]
-        if mon and mon.get("alive",True):
-            # Inimigo ataca o jogador
-            dmg=max(1,int(wild.get("atk",5)*(0.5+random.random()*0.45)))
-            mon["hp"]=max(0,mon["hp"]-dmg)
-            data["enemyHits"]=data.get("enemyHits",0)+1
-            data["lastEnemyAtk"]=now
-            
-            # Sistema de ataques automáticos do inimigo
-if data.get("inBattle") and data.get("wild"):
-    now=time.time()
-    last_atk=data.get("lastEnemyAtk",0)
-    if now-last_atk>=10:
-        mon=get_active_mon(data)
-        wild=data["wild"]
-        if mon and mon.get("alive",True):
-            dmg=max(1,int(wild.get("atk",5)*(0.5+random.random()*0.45)))
-            mon["hp"]=max(0,mon["hp"]-dmg)
-            data["enemyHits"]=data.get("enemyHits",0)+1
-            data["lastEnemyAtk"]=now
-            max_hits=3 if is_nightmare_mode(data) else 5
-            if data["enemyHits"]>=max_hits:
-                data["wild"]=None
-                clear_wild_state(data)
+            elif cid=="monster_fight": c.label="🐾 Monster Fight"; c.disabled=not can
+        
+        # Sistema de ataques automáticos do inimigo a cada 10 segundos
+        if data.get("inBattle") and data.get("wild"):
+            now=time.time()
+            last_atk=data.get("lastEnemyAtk",0)
+            if now-last_atk>=10:
+                mon2=get_active_mon(data)
+                wild2=data["wild"]
+                if mon2 and mon2.get("alive",True):
+                    dmg=max(1,int(wild2.get("atk",5)*(0.5+random.random()*0.45)))
+                    mon2["hp"]=max(0,mon2["hp"]-dmg)
+                    data["enemyHits"]=data.get("enemyHits",0)+1
+                    data["lastEnemyAtk"]=now
+                    max_hits=3 if is_nightmare_mode(data) else 5
+                    if data["enemyHits"]>=max_hits:
+                        data["wild"]=None
+                        clear_wild_state(data)
                 write_save(self.uid,data)
-        write_save(self.uid,data)
-            # Verificar se inimigo fugiu (5 acertos)
-            if data["enemyHits"]>=5:
-                clear_wild_state(data)
-                write_save(self.uid,data)
-                # Vamos notificar na próxima interação
-        write_save(self.uid,data)
+        
         return data
     async def _chk(self,interaction):
         data=load_clean_save(self.uid)
@@ -820,51 +798,47 @@ if data.get("inBattle") and data.get("wild"):
         data["wild"]=wild; write_save(self.uid,data)
         view=BattleView(self.uid)
         await interaction.response.edit_message(embed=make_wild_embed(wild,data,"\n".join(lines)),view=view)
-
-    @discord.ui.button(label="⚔️ Lutar",style=discord.ButtonStyle.danger,custom_id="fight_mon",row=0)
     
     @discord.ui.button(label="🐾 Monster Fight",style=discord.ButtonStyle.success,custom_id="monster_fight",row=0)
-async def monster_fight(self,interaction:discord.Interaction,button:discord.ui.Button):
-    if interaction.user.id!=self.uid: await interaction.response.send_message("❌ Não é a tua batalha!",ephemeral=True); return
-    data=await self._chk(interaction)
-    if not data: return
-    mon=get_active_mon(data)
-    if not mon or not mon.get("alive",True): await interaction.response.send_message("❌ Monstro KO! Usa `/curar` ou `/ativar`.",ephemeral=True); return
-    wild=data["wild"]; refresh_mon_stats(mon)
-    at,effect=get_type_effect(mon.get("t",""),wild.get("t",""))
-    rt,rteffect=get_type_effect(wild.get("t",""),mon.get("t",""))
-    db=1+data.get("rebirthCount",0)*0.5
-    # Monster Fight causa mais dano que ataque normal
-    dmg=max(1,int(mon["atkStat"]*(0.9+random.random()*0.5)*db*at))
-    ret=max(1,int(wild.get("atk",5)*(0.5+random.random()*0.45)*rt))
-    # Inimigo ataca primeiro
-    mon["hp"]=max(0,mon["hp"]-ret)
-    wild["hp"]=max(0,wild["hp"]-dmg)
-    data["battleBonus"]=max(-0.4,data.get("battleBonus",0)-0.08)
-    gainXp(mon,8+int(wild.get("atk",5)*1.6),data)
-    lines=[]
-    if at>1: lines.append(f"⚡ **Super eficaz!** {mon.get('e','')} causou **{dmg}** dano!")
-    elif at<1: lines.append(f"💧 *Pouco eficaz...* {mon.get('e','')} causou **{dmg}** dano.")
-    else: lines.append(f"🐾 {mon.get('e','')} **{mon.get('species',mon.get('n','?'))}** lutou! **{dmg}** dano!")
-    if rt>1: lines.append(f"⚡ **{wild['e']} {wild['n']}** contra-atacou com **{ret}** dano! *Super eficaz!*")
-    elif rt<1: lines.append(f"💧 **{wild['e']} {wild['n']}** contra-atacou com **{ret}** dano. *Pouco eficaz...*")
-    else: lines.append(f"🗡️ **{wild['e']} {wild['n']}** contra-atacou! **-{ret}** HP")
-    if mon["hp"]<=0:
-        mon["alive"]=False; lines.append(f"💀 **{mon.get('species',mon.get('n','?'))}** desmaiou!")
-        clear_wild_state(data); write_save(self.uid,data)
-        await interaction.response.edit_message(embed=make_wild_embed(wild,data,"\n".join(lines)),view=None); return
-    if wild["hp"]<=0:
-        wild["hp"]=0; lines.append(f"✅ **{wild['n']}** derrotado! Usa 🔮 Ball para capturar!")
-        data["wild"]=wild; data["battleBonus"]=min(0.65,data.get("battleBonus",0)+0.15)
-        write_save(self.uid,data)
+    async def monster_fight(self,interaction:discord.Interaction,button:discord.ui.Button):
+        if interaction.user.id!=self.uid: await interaction.response.send_message("❌ Não é a tua batalha!",ephemeral=True); return
+        data=await self._chk(interaction)
+        if not data: return
+        mon=get_active_mon(data)
+        if not mon or not mon.get("alive",True): await interaction.response.send_message("❌ Monstro KO! Usa `/curar` ou `/ativar`.",ephemeral=True); return
+        wild=data["wild"]; refresh_mon_stats(mon)
+        at,effect=get_type_effect(mon.get("t",""),wild.get("t",""))
+        rt,rteffect=get_type_effect(wild.get("t",""),mon.get("t",""))
+        db=1+data.get("rebirthCount",0)*0.5
+        dmg=max(1,int(mon["atkStat"]*(0.9+random.random()*0.5)*db*at))
+        ret=max(1,int(wild.get("atk",5)*(0.5+random.random()*0.45)*rt))
+        mon["hp"]=max(0,mon["hp"]-ret)
+        wild["hp"]=max(0,wild["hp"]-dmg)
+        data["battleBonus"]=max(-0.4,data.get("battleBonus",0)-0.08)
+        gainXp(mon,8+int(wild.get("atk",5)*1.6),data)
+        lines=[]
+        if at>1: lines.append(f"⚡ **Super eficaz!** {mon.get('e','')} causou **{dmg}** dano!")
+        elif at<1: lines.append(f"💧 *Pouco eficaz...* {mon.get('e','')} causou **{dmg}** dano.")
+        else: lines.append(f"🐾 {mon.get('e','')} **{mon.get('species',mon.get('n','?'))}** lutou! **{dmg}** dano!")
+        if rt>1: lines.append(f"⚡ **{wild['e']} {wild['n']}** contra-atacou com **{ret}** dano! *Super eficaz!*")
+        elif rt<1: lines.append(f"💧 **{wild['e']} {wild['n']}** contra-atacou com **{ret}** dano. *Pouco eficaz...*")
+        else: lines.append(f"🗡️ **{wild['e']} {wild['n']}** contra-atacou! **-{ret}** HP")
+        if mon["hp"]<=0:
+            mon["alive"]=False; lines.append(f"💀 **{mon.get('species',mon.get('n','?'))}** desmaiou!")
+            clear_wild_state(data); write_save(self.uid,data)
+            await interaction.response.edit_message(embed=make_wild_embed(wild,data,"\n".join(lines)),view=None); return
+        if wild["hp"]<=0:
+            wild["hp"]=0; lines.append(f"✅ **{wild['n']}** derrotado! Usa 🔮 Ball para capturar!")
+            data["wild"]=wild; data["battleBonus"]=min(0.65,data.get("battleBonus",0)+0.15)
+            write_save(self.uid,data)
+            view=BattleView(self.uid)
+            for c in view.children:
+                if getattr(c,"custom_id","")=="monster_fight": c.disabled=True; c.label="🐾 Derrotado"
+            await interaction.response.edit_message(embed=make_wild_embed(wild,data,"\n".join(lines)),view=view); return
+        lines.append(f"💚 Teu monstro: **{mon['hp']}/{mon.get('maxHp','?')}** HP")
+        data["wild"]=wild; write_save(self.uid,data)
         view=BattleView(self.uid)
-        for c in view.children:
-            if getattr(c,"custom_id","")=="monster_fight": c.disabled=True; c.label="🐾 Derrotado"
-        await interaction.response.edit_message(embed=make_wild_embed(wild,data,"\n".join(lines)),view=view); return
-    lines.append(f"💚 Teu monstro: **{mon['hp']}/{mon.get('maxHp','?')}** HP")
-    data["wild"]=wild; write_save(self.uid,data)
-    view=BattleView(self.uid)
-    await interaction.response.edit_message(embed=make_wild_embed(wild,data,"\n".join(lines)),view=view)
+        await interaction.response.edit_message(embed=make_wild_embed(wild,data,"\n".join(lines)),view=view)
 
     @discord.ui.button(label="🔮 Ball",style=discord.ButtonStyle.primary,custom_id="throw_ball",row=0)
     async def throw_ball(self,interaction:discord.Interaction,button:discord.ui.Button):
