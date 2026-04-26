@@ -761,31 +761,55 @@ class BattleView(discord.ui.View):
             return None
         return data
 
-    @discord.ui.button(label="⚔️ Lutar",style=discord.ButtonStyle.danger,custom_id="fight_mon",row=0)
+        @discord.ui.button(label="⚔️ Lutar",style=discord.ButtonStyle.danger,custom_id="fight_mon",row=0)
     async def fight_mon(self,interaction:discord.Interaction,button:discord.ui.Button):
         if interaction.user.id!=self.uid: await interaction.response.send_message("❌ Não é a tua batalha!",ephemeral=True); return
         data=await self._chk(interaction)
         if not data: return
         cd=max(0,int(math.ceil(data.get("attackCooldownUntil",0)-time.time())))
         if cd>0: await interaction.response.send_message(f"⏳ Aguarda **{cd}s**!",ephemeral=True); return
+        
+        wild=data["wild"]
         mon=get_active_mon(data)
-        if not mon or not mon.get("alive",True): await interaction.response.send_message("❌ Monstro KO! Usa `/curar` ou `/ativar`.",ephemeral=True); return
-        wild=data["wild"]; refresh_mon_stats(mon)
-        at,effect = get_type_effect(mon.get("t",""),wild.get("t",""))
-        rt,rteffect = get_type_effect(wild.get("t",""),mon.get("t",""))
+        
+        # Jogador ataca sozinho (dano base sem monstro)
+        if not mon or not mon.get("alive",True):
+            dmg=max(1,int(8+random.random()*6))  # Dano base: 8-14
+            ret=max(1,int(wild.get("atk",5)*(0.5+random.random()*0.45)))
+            wild["hp"]=max(0,wild["hp"]-dmg)
+            data["attackCooldownUntil"]=time.time()+5.0
+            data["battleBonus"]=max(-0.4,data.get("battleBonus",0)-0.05)
+            lines=[]
+            lines.append(f"👊 Atacaste com as próprias mãos! **{dmg}** dano!")
+            lines.append(f"🗡️ **{wild['e']} {wild['n']}** contra-atacou! **-{ret}** HP (ignorado - sem monstro)")
+            if wild["hp"]<=0:
+                wild["hp"]=0; lines.append(f"✅ **{wild['n']}** derrotado! Usa 🔮 Ball para capturar!")
+                data["wild"]=wild; data["battleBonus"]=min(0.65,data.get("battleBonus",0)+0.10)
+                write_save(self.uid,data)
+                view=BattleView(self.uid)
+                for c in view.children:
+                    if getattr(c,"custom_id","")=="fight_mon": c.disabled=True; c.label="⚔️ Derrotado"
+                await interaction.response.edit_message(embed=make_wild_embed(wild,data,"\n".join(lines)),view=view); return
+            data["wild"]=wild; write_save(self.uid,data)
+            view=BattleView(self.uid)
+            await interaction.response.edit_message(embed=make_wild_embed(wild,data,"\n".join(lines)),view=view); return
+        
+        # Monstro ataca pelo jogador
+        refresh_mon_stats(mon)
+        at,effect=get_type_effect(mon.get("t",""),wild.get("t",""))
+        rt,rteffect=get_type_effect(wild.get("t",""),mon.get("t",""))
         db=1+data.get("rebirthCount",0)*0.5; xb=1.6 if data.get("xatkActive") else 1.0
         if data.get("xatkActive"): data["xatkActive"]=False
         dmg=max(1,int(mon["atkStat"]*(0.75+random.random()*0.45)*db*at*xb))
         ret=max(1,int(wild.get("atk",5)*(0.5+random.random()*0.45)*rt))
-        # Inimigo ataca primeiro (sincronizado com HTML)
         mon["hp"]=max(0,mon["hp"]-ret)
         wild["hp"]=max(0,wild["hp"]-dmg)
         data["battleBonus"]=max(-0.4,data.get("battleBonus",0)-0.08)
         gainXp(mon,8+int(wild.get("atk",5)*1.6),data)
         data["attackCooldownUntil"]=time.time()+5.0
         lines=[]
-        hint_at = get_type_hint_text(effect)
-        hint_rt = get_type_hint_text(rteffect)
+        hint_at=get_type_hint_text(effect)
+        hint_rt=get_type_hint_text(rteffect)
         if at>1: lines.append(f"⚡ **Super eficaz!** {mon.get('e','')} causou **{dmg}** dano!")
         elif at<1: lines.append(f"💧 *Pouco eficaz...* {mon.get('e','')} causou **{dmg}** dano.")
         else: lines.append(f"⚔️ {mon.get('e','')} **{mon.get('species',mon.get('n','?'))}** causou **{dmg}** dano!")
