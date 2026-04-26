@@ -1,7 +1,6 @@
 """
-Monster Hunter RPG - Discord Bot - V117 Corrigido
-Fixes: ataque funcional com cooldown 5s, batalhas com estado limpo,
-bosses aleatórios em /caçar, HUD fiel ao HTML, loja atualizada
+Monster Hunter RPG - Discord Bot - V118 HTML-Synced
+Sincronizado com monster_hunter_V117.html — mecânicas, HUD e sistema de batalha completos
 """
 
 import discord
@@ -11,7 +10,7 @@ import json, os, random, math, asyncio, time
 from typing import Optional
 
 # ══════════════════════════════════════════════
-# DADOS DO JOGO
+# DADOS DO JOGO (sincronizados com HTML)
 # ══════════════════════════════════════════════
 
 RARITY_PLAN = [
@@ -119,37 +118,39 @@ TYPE_DEFS = [
      "emojis":["🪄","✨","🔮","📖","🌙","⭐","💜","🎩","🃏","🪬","📜","🔯","🌀","💫","🧿"]},
 ]
 
+# TYPE_CHART sincronizado com HTML (advantages/disadvantages)
 TYPE_CHART = {
-    "fogo":    {"adv":["gelo","planta"],     "dis":["terra","água"]},
-    "água":    {"adv":["fogo","gelo"],       "dis":["planta","trovão"]},
-    "planta":  {"adv":["água","terra"],      "dis":["fogo","veneno"]},
-    "terra":   {"adv":["trovão","fogo"],     "dis":["planta","cristal"]},
-    "ar":      {"adv":["veneno","sombra"],   "dis":["cosmos","metal"]},
-    "gelo":    {"adv":["luz","veneno"],      "dis":["fogo","água"]},
-    "trovão":  {"adv":["água","som"],        "dis":["terra","sombra"]},
-    "sombra":  {"adv":["cosmos","trovão"],   "dis":["luz","ar"]},
-    "cristal": {"adv":["terra","tempo"],     "dis":["som"]},
-    "veneno":  {"adv":["planta","metal"],    "dis":["ar","gelo"]},
-    "som":     {"adv":["cristal","metal"],   "dis":["cosmos","trovão"]},
-    "luz":     {"adv":["tempo","sombra"],    "dis":["metal","gelo"]},
-    "tempo":   {"adv":["cosmos","trovão"],   "dis":["luz","cristal"]},
-    "metal":   {"adv":["luz","ar"],          "dis":["som","veneno"]},
-    "cosmos":  {"adv":["ar","som"],          "dis":["tempo","sombra"]},
-    "fantasma":{"adv":["psíquico","luta"],   "dis":["arcano","metal"]},
-    "dragão":  {"adv":["metal","arcano"],    "dis":["gelo","fada"]},
-    "fada":    {"adv":["dragão","luta"],     "dis":["veneno","metal"]},
-    "psíquico":{"adv":["luta","fantasma"],   "dis":["sombra","inseto"]},
-    "luta":    {"adv":["metal","gelo"],      "dis":["fada","psíquico"]},
-    "inseto":  {"adv":["psíquico","planta"], "dis":["fogo","ar"]},
-    "néon":    {"adv":["mecânico","sombra"], "dis":["nuclear","arcano"]},
-    "nuclear": {"adv":["néon","inseto"],     "dis":["espírito","terra"]},
-    "espírito":{"adv":["nuclear","sombra"],  "dis":["dragão","metal"]},
-    "mecânico":{"adv":["ar","gelo"],         "dis":["néon","nuclear"]},
-    "ventos":  {"adv":["inseto","fogo"],     "dis":["metal","terra"]},
-    "magma":   {"adv":["gelo","terra"],      "dis":["água","ventos"]},
-    "arcano":  {"adv":["fantasma","cosmos"], "dis":["dragão","sombra"]},
+    "fogo":    {"advantages":["gelo","planta"],          "disadvantages":["terra","água"]},
+    "água":    {"advantages":["fogo","gelo"],            "disadvantages":["planta","trovão"]},
+    "planta":  {"advantages":["água","terra"],           "disadvantages":["fogo","veneno"]},
+    "terra":   {"advantages":["trovão","fogo"],          "disadvantages":["planta","cristal"]},
+    "ar":      {"advantages":["veneno","sombra"],        "disadvantages":["cosmos","metal"]},
+    "gelo":    {"advantages":["luz","veneno"],           "disadvantages":["fogo","água"]},
+    "trovão":  {"advantages":["água","som"],             "disadvantages":["terra","sombra"]},
+    "sombra":  {"advantages":["cosmos","trovão"],        "disadvantages":["luz","ar"]},
+    "cristal": {"advantages":["terra","tempo"],          "disadvantages":["som"]},
+    "veneno":  {"advantages":["planta","metal"],         "disadvantages":["ar","gelo"]},
+    "som":     {"advantages":["cristal","metal"],        "disadvantages":["cosmos","trovão"]},
+    "luz":     {"advantages":["tempo","sombra"],         "disadvantages":["metal","gelo"]},
+    "tempo":   {"advantages":["cosmos","trovão"],        "disadvantages":["luz","cristal"]},
+    "metal":   {"advantages":["luz","ar"],               "disadvantages":["som","veneno"]},
+    "cosmos":  {"advantages":["ar","som"],               "disadvantages":["tempo","sombra"]},
+    "fantasma":{"advantages":["psíquico","luta"],        "disadvantages":["arcano","metal"]},
+    "dragão":  {"advantages":["metal","arcano"],         "disadvantages":["gelo","fada"]},
+    "fada":    {"advantages":["dragão","luta"],          "disadvantages":["veneno","metal"]},
+    "psíquico":{"advantages":["luta","fantasma"],        "disadvantages":["sombra","inseto"]},
+    "luta":    {"advantages":["metal","gelo"],           "disadvantages":["fada","psíquico"]},
+    "inseto":  {"advantages":["psíquico","planta"],      "disadvantages":["fogo","ar"]},
+    "néon":    {"advantages":["mecânico","sombra"],      "disadvantages":["nuclear","arcano"]},
+    "nuclear": {"advantages":["néon","inseto"],          "disadvantages":["espírito","terra"]},
+    "espírito":{"advantages":["nuclear","sombra"],       "disadvantages":["dragão","metal"]},
+    "mecânico":{"advantages":["ar","gelo"],              "disadvantages":["néon","nuclear"]},
+    "ventos":  {"advantages":["inseto","fogo"],          "disadvantages":["metal","terra"]},
+    "magma":   {"advantages":["gelo","terra"],           "disadvantages":["água","ventos"]},
+    "arcano":  {"advantages":["fantasma","cosmos"],      "disadvantages":["dragão","sombra"]},
 }
 
+# Bosses completos sincronizados com HTML
 BOSSES = [
     {"n":"Rei das Chamas","t":"fogo","e":"👹","hp":1000,"atk":35,"reward":500,"title":"Senhor do Inferno","mats":[{"n":"Coroa de Fogo","v":200}]},
     {"n":"Titã dos Mares","t":"água","e":"🐋","hp":1400,"atk":30,"reward":600,"title":"Leviatã Ancestral","mats":[{"n":"Escudo Abissal","v":200}]},
@@ -184,7 +185,7 @@ BOSSES = [
     {"n":"???","t":"???","e":"❓","hp":999999,"atk":12000,"reward":10000,"title":"???","mats":[{"n":"Essência Divina","v":1000}],"special":"final_boss"},
 ]
 
-# Loja V117 completa com preços do HTML
+# Loja completa sincronizada com HTML
 SHOP_ITEMS = [
     {"id":"superball",   "n":"Super Ball",         "e":"🔵","desc":"Captura +15% por uso (máx 3/batalha)",              "price":40},
     {"id":"ultraball",   "n":"Ultra Ball",         "e":"🟣","desc":"Captura +25% por uso (máx 2/batalha)",              "price":90},
@@ -246,6 +247,7 @@ def build_mons():
                     "hp":max(1,plan["hp"]+td["hpMod"]),"atk":max(1,plan["atk"]+td["atkMod"]),
                     "mats":[{"n":f"{td['mat']} {td['t']}","v":plan["mat"]}],"rare":plan["rare"],
                 })
+    # Monstros especiais (sincronizados com HTML)
     mons += [
         {"n":"OXIGÉNIO","e":"💨","t":"Ar","c":0xaae0ff,"r":0.05,"hp":95,"atk":88,"mats":[{"n":"O2","v":130}],"rare":"divino"},
         {"n":"Ciclone-Rei","e":"🌀","t":"caos","c":0x6b44d9,"r":0.06,"hp":122,"atk":28,"mats":[{"n":"Olho do Caos","v":120}],"rare":"Divino"},
@@ -258,7 +260,7 @@ MON_INDEX = {m["n"]:m for m in MONS}
 BOSS_INDEX = {b["n"]:b for b in BOSSES}
 
 # ══════════════════════════════════════════════
-# FUNÇÕES DO JOGO
+# FUNÇÕES DO JOGO (sincronizadas com HTML)
 # ══════════════════════════════════════════════
 
 def xp_need(lv): return max(10,int(10*(lv**1.4)))
@@ -280,29 +282,79 @@ def refresh_mon_stats(mon):
     bh=mon.get("baseHp") or sp.get("hp",20)
     ba=mon.get("baseAtk") or sp.get("atk",5)
     lv=mon.get("level",1); ti=mon.get("tier",1); tm=tier_mult(ti)
-    mon["maxHp"]=max(1,int((bh+lv*2.5+mon.get("hpBoost",0))*tm))
-    mon["atkStat"]=max(1,int((ba+lv*1.5+mon.get("atkBoost",0))*tm))
+    # Bónus de rebirth (sincronizado com HTML: rebirthBuff = 0.3 + rebirthCount * 0.5)
+    rebirth_bonus = 1.0 + (mon.get("_rebirthBonus", 0) * 0.5)
+    mon["maxHp"]=max(1,int((bh+lv*2.5+mon.get("hpBoost",0))*tm*rebirth_bonus))
+    mon["atkStat"]=max(1,int((ba+lv*1.5+mon.get("atkBoost",0))*tm*rebirth_bonus))
     mon["hp"]=min(mon.get("hp",mon["maxHp"]),mon["maxHp"])
 
-def get_type_mult(atk,def_):
+def get_type_effect(atk,def_):
+    """Retorna o multiplicador de tipo e o estado (vantagem/desvantagem)"""
     info=TYPE_CHART.get(atk,{})
-    if def_ in info.get("adv",[]): return 1.5
-    if def_ in info.get("dis",[]): return 0.67
-    return 1.0
+    if def_ in info.get("advantages",[]): return 1.35, "advantage"
+    if def_ in info.get("disadvantages",[]): return 0.8, "disadvantage"
+    return 1.0, "neutral"
+
+def get_type_hint_text(effect):
+    """Retorna texto de dica de tipo para o HUD"""
+    if effect == "advantage": return "⚡ *Super eficaz!*"
+    if effect == "disadvantage": return "💧 *Pouco eficaz...*"
+    return ""
 
 def get_rank_info(elo):
     for t,l,i,c in RANK_INFO:
         if elo>=t: return {"label":l,"icon":i,"color":c}
     return {"label":"PLÁSTICO","icon":"♻️","color":0x95a5a6}
 
-def generate_wild_mon(forced_rarity=None,forced_type=None):
+def get_team_avg_level(team):
+    """Calcula o nível médio da equipa"""
+    if not team: return 1
+    return sum(m.get("level",1) for m in team) / len(team)
+
+def get_team_max_level(team):
+    """Calcula o nível máximo da equipa"""
+    if not team: return 1
+    return max(m.get("level",1) for m in team)
+
+def get_team_level_catch_penalty(data):
+    """Penalidade de captura baseada no nível médio da equipa"""
+    avg_lv = get_team_avg_level(data.get("team",[]))
+    if avg_lv <= 1: return 1
+    divisor = 1 + (avg_lv / 40) ** 1.35
+    return min(12, divisor)
+
+def is_nightmare_mode(data):
+    """Verifica se o modo pesadelo está ativo"""
+    all_mons = data.get("team",[]) + data.get("box",[])
+    return any(m.get("level",1) >= 1000 for m in all_mons)
+
+def get_nightmare_mult(data):
+    """Multiplicador do modo pesadelo"""
+    if not is_nightmare_mode(data): return 1
+    count = sum(1 for m in (data.get("team",[])+data.get("box",[])) if m.get("level",1) >= 1000)
+    return 1 + min(count * 0.5, 4)
+
+def generate_wild_mon(forced_rarity=None,forced_type=None,data=None):
+    """Gera monstro selvagem com suporte a iscas e modo pesadelo"""
+    # Isco de raridade
     if forced_rarity:
         rord=["comum","incomum","raro","épico","lendário","mítico","divino","Divino"]
         mi=rord.index(forced_rarity) if forced_rarity in rord else 0
         elig=[p for p in RARITY_PLAN if rord.index(p["rare"])>=mi]
         plan=random.choice(elig) if elig else random.choice(RARITY_PLAN)
     else:
+        # Pesos de raridade (sincronizados com HTML)
         wm={"comum":12,"incomum":7,"raro":4.5,"épico":2.2,"lendário":1,"mítico":0.5}
+        if data:
+            # Ajuste de spawn baseado em incenso raro
+            stacks = data.get("rareSpawnPassive", 0)
+            if stacks > 0:
+                wm["comum"] = max(1, wm["comum"] - stacks * 1.44)
+                wm["incomum"] = max(1, wm["incomum"] - stacks * 0.42)
+                wm["raro"] = min(20, wm["raro"] + stacks * 1.575)
+                wm["épico"] = min(15, wm["épico"] + stacks * 1.21)
+                wm["lendário"] = min(10, wm["lendário"] + stacks * 0.8)
+                wm["mítico"] = min(8, wm["mítico"] + stacks * 0.55)
         pw=[(p,wm.get(p["rare"],5)) for p in RARITY_PLAN]
         tot=sum(w for _,w in pw); rnd=random.random()*tot
         plan=RARITY_PLAN[-1]
@@ -314,26 +366,217 @@ def generate_wild_mon(forced_rarity=None,forced_type=None):
     idx=RARITY_PLAN.index(plan)
     name=td["names"][min(idx,len(td["names"])-1)]
     emoji=td["emojis"][idx%len(td["emojis"])]
-    return {
+    wild = {
         "n":name,"t":td["t"],"e":emoji,"rare":plan["rare"],
         "hp":max(1,plan["hp"]+td["hpMod"]),"maxHp":max(1,plan["hp"]+td["hpMod"]),
         "atk":max(1,plan["atk"]+td["atkMod"]),"catch":plan["catch"],
         "color":td["c"],"mats":[{"n":f"{td['mat']} {td['t']}","v":plan["mat"]}],
     }
+    # Aplicar modo pesadelo
+    if data and is_nightmare_mode(data):
+        nm = get_nightmare_mult(data)
+        wild["hp"] = int(wild["hp"] * nm)
+        wild["maxHp"] = wild["hp"]
+        wild["atk"] = int(wild["atk"] * nm)
+    return wild
+
+def active_mon_capture_bonus(mon):
+    """Bónus de captura do monstro ativo"""
+    if not mon or not mon.get("alive",True): return 0
+    bonus = min(0.15, mon.get("level",1) * 0.008)
+    # Bónus de raridade do parceiro
+    sp = MON_INDEX.get(mon.get("species",""),{})
+    by_rare = {"comum":0,"incomum":0.03,"raro":0.06,"épico":0.1,"lendário":0.14,"mítico":0.18,"divino":0.24}
+    bonus += by_rare.get(sp.get("rare",""), 0)
+    bonus += max(0, (mon.get("tier",1)-1) * 0.02)
+    return bonus
+
+def get_special_type_catch_bonus(mon_type, data):
+    """Bónus de captura por tipo (bolas especiais)"""
+    bonus = 0
+    t = mon_type.lower()
+    items = data.get("items",{})
+    if items.get("dragoball",0) > 0 and t in ("dragão","fantasma","arcano","dragao"):
+        bonus += 0.40
+    if items.get("neoncage",0) > 0 and t in ("néon","mecânico","nuclear","neon","mecanico"):
+        bonus += 0.35
+    if items.get("soulcatcher",0) > 0 and t in ("fantasma","espírito","espirito"):
+        bonus += 0.50
+    return bonus
 
 def get_catch_chance(wild,data,ball_type="normal"):
-    base=wild.get("catch",0.5)
-    bonus=0.0
-    if ball_type=="super": bonus+=0.15
-    elif ball_type=="ultra": bonus+=0.25
-    elif ball_type=="golden": bonus+=0.60
-    elif ball_type=="dragoball" and wild.get("t","") in ("dragão","fantasma","arcano"): bonus+=0.40
-    elif ball_type=="neoncage" and wild.get("t","") in ("néon","mecânico","nuclear"): bonus+=0.35
-    elif ball_type=="soulcatcher" and wild.get("t","") in ("fantasma","espírito"): bonus+=0.50
-    rord=["comum","incomum","raro","épico","lendário","mítico","divino","Divino"]
-    if data.get("items",{}).get("rarepotion",0)>0 and wild.get("rare","comum") in rord[2:]: bonus+=0.30
-    total=min(0.97,base+data.get("battleBonus",0)+data.get("catchBonus",0)+bonus)
-    return max(0.01,total)
+    """Calcula a chance de captura (sincronizada com HTML)"""
+    rare_map = {"comum":.78,"incomum":.6,"raro":.38,"épico":.24,"lendário":.14,"mítico":.09,"divino":.05}
+    is_rare = wild.get("rare","comum") in ("raro","épico","lendário","mítico","divino")
+    hp_bonus = (1 - wild.get("hp",0)/max(1,wild.get("maxHp",1))) * 0.18
+    chance = rare_map.get(wild.get("rare","comum"), wild.get("catch",.5))
+    chance += data.get("catchBonus",0) + data.get("battleBonus",0) + active_mon_capture_bonus(get_active_mon(data)) + hp_bonus
+    if is_rare: chance += data.get("rareCatchBonus",0)
+    if wild.get("n") == "DEUS-DRAGÃO": chance -= 0.08
+    # Bónus das bolas especiais por tipo
+    chance += get_special_type_catch_bonus(wild.get("t",""), data)
+    # Bónus de ball
+    if ball_type=="super": chance+=0.15
+    elif ball_type=="ultra": chance+=0.25
+    elif ball_type=="golden": chance+=0.60
+    # Modo pesadelo
+    if is_nightmare_mode(data): chance = chance / get_nightmare_mult(data)
+    # Penalidade por nível
+    lv_penalty = get_team_level_catch_penalty(data)
+    chance = chance / lv_penalty
+    return max(0.02, min(0.97, chance))
+
+def pokedex_total(): return len(MONS)+len([b for b in BOSSES if b.get("special")!="final_boss"])
+def pokedex_progress(data):
+    return len(data.get("caught",[]))+len([b for b in data.get("bossDefeated",[]) if b not in ("???","Leonking")])
+def is_pokedex_complete(data): return pokedex_progress(data)>=pokedex_total()
+
+def roll_random_boss(data):
+    normal=[b for b in BOSSES if b.get("special") not in ("nico","master_only","murilo","final_boss")]
+    defeated=set(data.get("bossDefeated",[]))
+    pool=[b for b in normal if b["n"] not in defeated] or normal
+    return random.choice(pool) if pool else None
+
+def scale_boss(boss,data):
+    team=data.get("team",[]); 
+    if not team: return boss["hp"],boss["atk"]
+    for m in team: refresh_mon_stats(m)
+    avg_tier=sum(m.get("tier",1) for m in team)/len(team)
+    avg_hp=sum(m.get("maxHp",20) for m in team)/len(team)
+    avg_atk=sum(m.get("atkStat",5) for m in team)/len(team)
+    scale=1.0+(avg_tier-1)*0.08+min(0.6,avg_hp/250.0)+min(0.6,avg_atk/50.0)
+    return max(1,int(boss["hp"]*scale)),max(1,int(boss["atk"]*scale))
+
+def start_boss_battle(data,boss,mon):
+    refresh_mon_stats(mon)
+    is_final=boss.get("special")=="final_boss"
+    sh,sa=scale_boss(boss,data) if not is_final else (boss["hp"],boss["atk"])
+    data["inBossBattle"]=True; data["boss"]={**boss,"hp":sh,"atk":sa}
+    data["bossHp"]=sh; data["bossMaxHp"]=sh
+    data["playerHp"]=mon["maxHp"]; data["playerMaxHp"]=mon["maxHp"]; data["playerMon"]=mon
+    data["defending"]=False; data["bossCharging"]=False; data["bossTurn"]=0
+    data["bossBallCD"]=0; data["lowHpWarned"]=False; data["confirmAtk20"]=False
+    data["finalBossPhase"]=1 if is_final else 0
+
+def boss_counterattack(data,lines):
+    boss=data["boss"]; data["bossTurn"]=data.get("bossTurn",0)+1
+    raw=boss["atk"]*random.uniform(0.8,1.2)
+    mon=data.get("playerMon")
+    mult,effect = get_type_effect(boss.get("t",""),mon.get("t","")) if mon else (1.0,"neutral")
+    raw*=mult
+    is_special=False
+    if data.get("bossCharging"): raw*=1.8; data["bossCharging"]=False; is_special=True
+    if data.get("bossShield",0)>0:
+        absorbed=int(raw*0.4); raw-=absorbed; data["bossShield"]-=1
+        lines.append(f"🛡️ Escudo absorveu **{absorbed:,}** dano!")
+    if data.get("defending"): raw*=0.4  # Defesa reduz 60% (sincronizado com HTML)
+    dmg=max(1,int(raw)); data["playerHp"]=max(0,data.get("playerHp",0)-dmg); data["defending"]=False
+    hint = get_type_hint_text(effect)
+    prefix="💥 **ATAQUE ESPECIAL!** " if is_special else ""
+    lines.append(f"{prefix}👹 **{boss['e']} {boss['n']}** causou **{dmg:,}** dano!{hint}")
+    # Boss carrega ataque especial a cada 3 turnos
+    if data["bossTurn"]%3==0 and not data.get("bossCharging"):
+        data["bossCharging"]=True; lines.append("⚠️ O Boss **carrega** um ataque especial! Defende-te no próximo turno!")
+    if data.get("bossBallCD",0)>0: data["bossBallCD"]-=1
+
+def start_final_boss_phase2(data):
+    boss=data.get("boss",{})
+    data["finalBossPhase"]=2
+    new_atk=int(round(boss.get("atk",12000)*1.45))
+    data["boss"]={
+        "n":"Leonking","e":"🐐","t":"Deus","title":"O Rei dos Deuses",
+        "hp":max(6500000,int(round(data.get("bossMaxHp",999999)*0.72))),
+        "atk":new_atk,"reward":int(round(boss.get("reward",10000)*1.5)),
+        "mats":boss.get("mats",[{"n":"Essência Divina","v":1000}]),"special":"final_boss","phase":2,
+    }
+    data["bossMaxHp"]=data["boss"]["hp"]; data["bossHp"]=data["bossMaxHp"]
+    data["playerHp"]=min(data.get("playerMaxHp",100),data.get("playerHp",0)+int(data.get("playerMaxHp",100)*0.3))
+    data["defending"]=False; data["bossShield"]=0; data["bossCharging"]=False
+    data["bossTurn"]=0; data["bossBallCD"]=0; data["lowHpWarned"]=False
+
+# ══════════════════════════════════════════════
+# HUD (sincronizado com HTML)
+# ══════════════════════════════════════════════
+
+def hp_bar(pct,length=12):
+    pct=max(0.0,min(1.0,pct)); filled=round(pct*length)
+    bar="█"*filled+"░"*(length-filled)
+    seg="🟩" if pct>0.6 else ("🟨" if pct>0.3 else "🟥")
+    return f"{seg}`{bar}`{int(pct*100)}%"
+
+TYPE_EMOJIS={
+    "fogo":"🔥","água":"💧","planta":"🌿","terra":"🪨","ar":"🌬️","gelo":"❄️","trovão":"⚡",
+    "sombra":"🌑","cristal":"💎","veneno":"☠️","som":"🎵","tempo":"⌛","luz":"☀️","cosmos":"🌌",
+    "metal":"⚙️","fantasma":"👻","dragão":"🐉","fada":"🧚","psíquico":"🔮","luta":"👊",
+    "inseto":"🐛","néon":"🟢","nuclear":"☢️","espírito":"🙏","mecânico":"🤖","ventos":"🌪️",
+    "magma":"🌋","arcano":"🪄","boss":"⚔️","fofa":"🐈","molestador":"👨‍🦽","???":"❓","Deus":"🌟",
+}
+def type_badge(t): return f"{TYPE_EMOJIS.get(t,'❓')} `{t.upper()}`"
+def rare_badge(r): return f"{RARE_EMOJI.get(r,'❓')} `{r.upper()}`"
+def tier_stars(t): return ["","★","★★","★★★","★★★★","★★★★★"][min(t,5)]
+
+def make_wild_embed(wild,data,msg=""):
+    rare=wild.get("rare","comum"); color=RARE_COLOR.get(rare,0x888888)
+    hp=wild.get("hp",0); mhp=wild.get("maxHp",1); pct=hp/max(1,mhp); bar=hp_bar(pct)
+    embed=discord.Embed(title="⚔️ Batalha Selvagem",color=color)
+    embed.add_field(name="💰 Ouro",value=f"**{data.get('gold',0)}**",inline=True)
+    embed.add_field(name="🔮 Balls",value=f"**{data.get('balls',0)}**",inline=True)
+    embed.add_field(name="⭐ Master",value=f"**{data.get('masterball',0)}**",inline=True)
+    embed.add_field(name=f"{wild['e']} **{wild['n']}**",
+        value=f"{type_badge(wild.get('t','?'))} · {rare_badge(rare)}\nHP: **{hp}/{mhp}**\n{bar}\n⚔️ ATK: **{wild.get('atk','?')}**",inline=False)
+    if msg: embed.add_field(name="📋 Log",value=msg,inline=False)
+    mon=get_active_mon(data)
+    if mon:
+        refresh_mon_stats(mon)
+        mpct=mon["hp"]/max(1,mon["maxHp"]); mbar=hp_bar(mpct,10)
+        alive="💚" if mon.get("alive",True) else "💀"
+        cd=max(0,int(math.ceil(data.get("attackCooldownUntil",0)-time.time())))
+        cd_txt=f"⏳ Ataque em **{cd}s**" if cd>0 else "⚔️ Pronto para atacar!"
+        sp=mon.get("species",mon.get("n","?"))
+        # Calcular penalidade de nível para mostrar no HUD
+        lv_penalty = get_team_level_catch_penalty(data)
+        penalty_pct = int((1 - 1/lv_penalty) * 100) if lv_penalty > 1 else 0
+        penalty_txt = f" 🔒 Captura -{penalty_pct}%" if penalty_pct > 5 else ""
+        embed.add_field(name=f"{alive} {mon.get('e','')} **{sp}** — Lv.{mon.get('level',1)} {tier_stars(mon.get('tier',1))}",
+            value=f"{type_badge(mon.get('t','?'))}\n❤️ **{mon['hp']}/{mon['maxHp']}** · ⚔️ **{mon.get('atkStat','?')}**\n{mbar}\n{cd_txt}{penalty_txt}",inline=False)
+    else:
+        embed.add_field(name="⚔️ Sem Monstro Ativo",value="Usa 🔮 Ball para capturar o teu primeiro monstro!",inline=False)
+    embed.set_footer(text="⚔️ Lutar tem cooldown 5s · inimigo contra-ataca · 🏃 Fugir para escapar")
+    return embed
+
+def make_boss_embed(data,msg=""):
+    boss=data.get("boss",{}); bh=data.get("bossHp",0); bm=data.get("bossMaxHp",1)
+    ph=data.get("playerHp",0); pm=data.get("playerMaxHp",1)
+    bp=bh/max(1,bm); pp=ph/max(1,pm); bbar=hp_bar(bp,14); pbar=hp_bar(pp,12)
+    phase=data.get("finalBossPhase",0); is_final=boss.get("special")=="final_boss"
+    if is_final and phase==2: color=0xffd700
+    elif is_final: color=0xff00ff
+    elif bp>0.5: color=0x8a0020
+    elif bp>0.25: color=0xcc2200
+    else: color=0xff0000
+    if is_final and phase==2: prefix="🐐 BOSS FINAL — FASE 2"
+    elif is_final: prefix="🌌 BOSS FINAL — FASE 1"
+    elif boss.get("special")=="nico": prefix="🐈 BOSS SECRETO"
+    elif boss.get("special")=="master_only": prefix="👑 BOSS MASTER-ONLY"
+    else: prefix="💀 BOSS"
+    embed=discord.Embed(title=f"{prefix}: {boss.get('e','')} {boss.get('n','?')}",
+        description=f"*{boss.get('title','Chefe Lendário')}*",color=color)
+    if data.get("bossCharging"):
+        embed.add_field(name="⚠️ ATAQUE ESPECIAL A CARREGAR!",value="**Defende-te ou sofres x1.8 dano!**",inline=False)
+    if bp<=0.20 and bp>0 and not (is_final and phase==1):
+        embed.add_field(name="🌀 HP Crítico!",value="**Tenta capturá-lo antes de o matar!**",inline=False)
+    embed.add_field(name=f"🔴 Boss HP — {bh:,}/{bm:,} ({int(bp*100)}%)",value=f"```\n{bbar}\n```",inline=False)
+    embed.add_field(name="Tipo",value=type_badge(boss.get("t","?")),inline=True)
+    embed.add_field(name="⚔️ ATK",value=f"**{boss.get('atk',0):,}**",inline=True)
+    bcd=data.get("bossBallCD",0)
+    embed.add_field(name="🔮 Ball",value="Disponível" if bcd<=0 else f"⏳ {bcd} turno(s)",inline=True)
+    mon=data.get("playerMon"); mn=f"{mon.get('e','')} {mon.get('species',mon.get('n','?'))}" if mon else "Monstro Ativo"
+    sh="  🛡️ Escudo!" if data.get("bossShield",0)>0 else ""
+    if data.get("defending"): sh+="  🛡️ A defender!"
+    embed.add_field(name=f"❤️ Teu HP — {ph:,}/{pm:,}{sh}",value=f"**{mn}**\n```\n{pbar}\n```",inline=False)
+    if msg: embed.add_field(name="📋 Combate",value=msg,inline=False)
+    embed.set_footer(text=f"💰 {boss.get('reward',0):,} ouro · 🪨 {', '.join(m['n'] for m in boss.get('mats',[]))}")
+    return embed
 
 # ══════════════════════════════════════════════
 # PERSISTÊNCIA
@@ -353,14 +596,16 @@ def default_save():
         "inBossBattle":False,"boss":None,"bossHp":0,"bossMaxHp":0,
         "playerHp":0,"playerMaxHp":0,"playerMon":None,
         "defending":False,"bossShield":0,"bossTurn":0,"bossCharging":False,"bossBallCD":0,
-        "xatkActive":False,"attackCooldownUntil":0,
+        "xatkActive":False,"attackCooldownUntil":0,"confirmAtk20":False,
         "rankedElo":1200,"rankedWins":0,"rankedLosses":0,
         "playerName":None,"playerId":None,"friendScores":{},
         "rebirthCount":0,"level":1,"battles":0,
         "forcedRarity":None,"forcedType":None,
         "bossRepelUntil":0,"pendingBoss":None,
         "finalBossPhase":0,"nicoPotions":0,"lowHpWarned":False,
-        "rareSpawnPassive":0,
+        "rareSpawnPassive":0,"rareCatchBonus":0,
+        "megaIncenseUntil":0,"typeDetectActive":False,
+        "battleUsed":{},
     }
 
 def load_save(uid):
@@ -386,12 +631,14 @@ def write_save(uid,data):
 def clear_wild_state(data):
     data["inBattle"]=False; data["wild"]=None; data["battleBonus"]=0
     data["xatkActive"]=False; data["attackCooldownUntil"]=0
+    data["confirmAtk20"]=False
 
 def clear_boss_state(data):
     data["inBossBattle"]=False; data["boss"]=None; data["bossHp"]=0; data["bossMaxHp"]=0
     data["playerHp"]=0; data["playerMaxHp"]=0; data["playerMon"]=None
     data["defending"]=False; data["bossCharging"]=False; data["bossTurn"]=0
     data["bossBallCD"]=0; data["lowHpWarned"]=False; data["finalBossPhase"]=0
+    data["confirmAtk20"]=False
 
 def sanitize_save(data):
     changed=False
@@ -432,6 +679,7 @@ def capture_wild(wild,data):
         "hp":wild.get("hp",20),"maxHp":wild.get("hp",20),"atkStat":wild.get("atk",5),
         "hpBoost":0,"atkBoost":0,"alive":True,"tier":tier_roll(wild.get("rare","comum")),
         "baseHp":wild.get("hp",20),"baseAtk":wild.get("atk",5),"color":wild.get("color",0x888888),
+        "customBaseStats":True,
     }
     data["nextMonId"]=data.get("nextMonId",1)+1; refresh_mon_stats(captured)
     if not data.get("activeMonId"): data["activeMonId"]=captured["id"]
@@ -442,152 +690,6 @@ def capture_wild(wild,data):
         data.setdefault("materials",{})[mat["n"]]=data["materials"].get(mat["n"],0)+qty
     data["gold"]=data.get("gold",0)+max(5,int(6+data.get("level",1)*3+random.random()*10))
     return captured
-
-def pokedex_total(): return len(MONS)+len([b for b in BOSSES if b.get("special")!="final_boss"])
-def pokedex_progress(data):
-    return len(data.get("caught",[]))+len([b for b in data.get("bossDefeated",[]) if b not in ("???","Leonking")])
-def is_pokedex_complete(data): return pokedex_progress(data)>=pokedex_total()
-
-def roll_random_boss(data):
-    normal=[b for b in BOSSES if b.get("special") not in ("nico","master_only","murilo","final_boss")]
-    defeated=set(data.get("bossDefeated",[]))
-    pool=[b for b in normal if b["n"] not in defeated] or normal
-    return random.choice(pool) if pool else None
-
-def scale_boss(boss,data):
-    team=data.get("team",[]); 
-    if not team: return boss["hp"],boss["atk"]
-    for m in team: refresh_mon_stats(m)
-    avg_tier=sum(m.get("tier",1) for m in team)/len(team)
-    avg_hp=sum(m.get("maxHp",20) for m in team)/len(team)
-    avg_atk=sum(m.get("atkStat",5) for m in team)/len(team)
-    scale=1.0+(avg_tier-1)*0.08+min(0.6,avg_hp/250.0)+min(0.6,avg_atk/50.0)
-    return max(1,int(boss["hp"]*scale)),max(1,int(boss["atk"]*scale))
-
-def start_boss_battle(data,boss,mon):
-    refresh_mon_stats(mon)
-    is_final=boss.get("special")=="final_boss"
-    sh,sa=scale_boss(boss,data) if not is_final else (boss["hp"],boss["atk"])
-    data["inBossBattle"]=True; data["boss"]={**boss,"hp":sh,"atk":sa}
-    data["bossHp"]=sh; data["bossMaxHp"]=sh
-    data["playerHp"]=mon["maxHp"]; data["playerMaxHp"]=mon["maxHp"]; data["playerMon"]=mon
-    data["defending"]=False; data["bossCharging"]=False; data["bossTurn"]=0
-    data["bossBallCD"]=0; data["lowHpWarned"]=False
-    data["finalBossPhase"]=1 if is_final else 0
-
-def boss_counterattack(data,lines):
-    boss=data["boss"]; data["bossTurn"]=data.get("bossTurn",0)+1
-    raw=boss["atk"]*random.uniform(0.8,1.2)
-    mon=data.get("playerMon")
-    tm=get_type_mult(boss.get("t",""),mon.get("t","")) if mon else 1.0; raw*=tm
-    is_special=False
-    if data.get("bossCharging"): raw*=1.8; data["bossCharging"]=False; is_special=True
-    if data.get("bossShield",0)>0:
-        absorbed=int(raw*0.4); raw-=absorbed; data["bossShield"]-=1
-        lines.append(f"🛡️ Escudo absorveu **{absorbed:,}** dano!")
-    if data.get("defending"): raw*=0.4
-    dmg=max(1,int(raw)); data["playerHp"]=max(0,data.get("playerHp",0)-dmg); data["defending"]=False
-    hint="" if tm==1.0 else (" ⚡ *Super eficaz!*" if tm>1.0 else " 💧 *Pouco eficaz...*")
-    prefix="💥 **ATAQUE ESPECIAL!** " if is_special else ""
-    lines.append(f"{prefix}👹 **{boss['e']} {boss['n']}** causou **{dmg:,}** dano!{hint}")
-    if data["bossTurn"]%3==0 and not data.get("bossCharging"):
-        data["bossCharging"]=True; lines.append("⚠️ O Boss **carrega** um ataque especial! Defende-te no próximo turno!")
-    if data.get("bossBallCD",0)>0: data["bossBallCD"]-=1
-
-def start_final_boss_phase2(data):
-    boss=data.get("boss",{})
-    data["finalBossPhase"]=2
-    new_atk=int(round(boss.get("atk",12000)*1.45))
-    data["boss"]={
-        "n":"Leonking","e":"🐐","t":"Deus","title":"O Rei dos Deuses",
-        "hp":max(6500000,int(round(data.get("bossMaxHp",999999)*0.72))),
-        "atk":new_atk,"reward":int(round(boss.get("reward",10000)*1.5)),
-        "mats":boss.get("mats",[{"n":"Essência Divina","v":1000}]),"special":"final_boss","phase":2,
-    }
-    data["bossMaxHp"]=data["boss"]["hp"]; data["bossHp"]=data["bossMaxHp"]
-    data["playerHp"]=min(data.get("playerMaxHp",100),data.get("playerHp",0)+int(data.get("playerMaxHp",100)*0.3))
-    data["defending"]=False; data["bossShield"]=0; data["bossCharging"]=False
-    data["bossTurn"]=0; data["bossBallCD"]=0; data["lowHpWarned"]=False
-
-# ══════════════════════════════════════════════
-# HUD (fiel ao HTML)
-# ══════════════════════════════════════════════
-
-def hp_bar(pct,length=12):
-    pct=max(0.0,min(1.0,pct)); filled=round(pct*length)
-    bar="█"*filled+"░"*(length-filled)
-    seg="🟩" if pct>0.6 else ("🟨" if pct>0.3 else "🟥")
-    return f"{seg}`{bar}`{int(pct*100)}%"
-
-TYPE_EMOJIS={
-    "fogo":"🔥","água":"💧","planta":"🌿","terra":"🪨","ar":"🌬️","gelo":"❄️","trovão":"⚡",
-    "sombra":"🌑","cristal":"💎","veneno":"☠️","som":"🎵","tempo":"⌛","luz":"☀️","cosmos":"🌌",
-    "metal":"⚙️","fantasma":"👻","dragão":"🐉","fada":"🧚","psíquico":"🔮","luta":"👊",
-    "inseto":"🐛","néon":"🟢","nuclear":"☢️","espírito":"🙏","mecânico":"🤖","ventos":"🌪️",
-    "magma":"🌋","arcano":"🪄","boss":"⚔️","fofa":"🐈","molestador":"👨‍🦽","???":"❓","Deus":"🌟",
-}
-def type_badge(t): return f"{TYPE_EMOJIS.get(t,'❓')} `{t.upper()}`"
-def rare_badge(r): return f"{RARE_EMOJI.get(r,'❓')} `{r.upper()}`"
-def tier_stars(t): return ["","★","★★","★★★","★★★★","★★★★★"][min(t,5)]
-
-def make_wild_embed(wild,data,msg=""):
-    rare=wild.get("rare","comum"); color=RARE_COLOR.get(rare,0x888888)
-    hp=wild.get("hp",0); mhp=wild.get("maxHp",1); pct=hp/max(1,mhp); bar=hp_bar(pct)
-    embed=discord.Embed(title="⚔️ Batalha Selvagem",color=color)
-    embed.add_field(name="💰 Ouro",value=f"**{data.get('gold',0)}**",inline=True)
-    embed.add_field(name="🔮 Balls",value=f"**{data.get('balls',0)}**",inline=True)
-    embed.add_field(name="⭐ Master",value=f"**{data.get('masterball',0)}**",inline=True)
-    embed.add_field(name=f"{wild['e']} **{wild['n']}**",
-        value=f"{type_badge(wild.get('t','?'))} · {rare_badge(rare)}\nHP: **{hp}/{mhp}**\n{bar}\n⚔️ ATK: **{wild.get('atk','?')}**",inline=False)
-    if msg: embed.add_field(name="📋 Log",value=msg,inline=False)
-    mon=get_active_mon(data)
-    if mon:
-        refresh_mon_stats(mon)
-        mpct=mon["hp"]/max(1,mon["maxHp"]); mbar=hp_bar(mpct,10)
-        alive="💚" if mon.get("alive",True) else "💀"
-        cd=max(0,int(math.ceil(data.get("attackCooldownUntil",0)-time.time())))
-        cd_txt=f"⏳ Ataque em **{cd}s**" if cd>0 else "⚔️ Pronto para atacar!"
-        sp=mon.get("species",mon.get("n","?"))
-        embed.add_field(name=f"{alive} {mon.get('e','')} **{sp}** — Lv.{mon.get('level',1)} {tier_stars(mon.get('tier',1))}",
-            value=f"{type_badge(mon.get('t','?'))}\n❤️ **{mon['hp']}/{mon['maxHp']}** · ⚔️ **{mon.get('atkStat','?')}**\n{mbar}\n{cd_txt}",inline=False)
-    else:
-        embed.add_field(name="⚔️ Sem Monstro Ativo",value="Usa 🔮 Ball para capturar o teu primeiro monstro!",inline=False)
-    embed.set_footer(text="⚔️ Lutar tem cooldown 5s · inimigo contra-ataca · 🏃 Fugir para escapar")
-    return embed
-
-def make_boss_embed(data,msg=""):
-    boss=data.get("boss",{}); bh=data.get("bossHp",0); bm=data.get("bossMaxHp",1)
-    ph=data.get("playerHp",0); pm=data.get("playerMaxHp",1)
-    bp=bh/max(1,bm); pp=ph/max(1,pm); bbar=hp_bar(bp,14); pbar=hp_bar(pp,12)
-    phase=data.get("finalBossPhase",0); is_final=boss.get("special")=="final_boss"
-    if is_final and phase==2: color=0xffd700
-    elif is_final: color=0xff00ff
-    elif bp>0.5: color=0x8a0020
-    elif bp>0.25: color=0xcc2200
-    else: color=0xff0000
-    if is_final and phase==2: prefix="🐐 BOSS FINAL — FASE 2"
-    elif is_final: prefix="🌌 BOSS FINAL — FASE 1"
-    elif boss.get("special")=="nico": prefix="🐈 BOSS SECRETO"
-    elif boss.get("special")=="master_only": prefix="👑 BOSS MASTER-ONLY"
-    else: prefix="💀 BOSS"
-    embed=discord.Embed(title=f"{prefix}: {boss.get('e','')} {boss.get('n','?')}",
-        description=f"*{boss.get('title','Chefe Lendário')}*",color=color)
-    if data.get("bossCharging"):
-        embed.add_field(name="⚠️ ATAQUE ESPECIAL A CARREGAR!",value="**Defende-te ou sofres x1.8 dano!**",inline=False)
-    if bp<=0.20 and bp>0 and not (is_final and phase==1):
-        embed.add_field(name="🌀 HP Crítico!",value="**Tenta capturá-lo antes de o matar!**",inline=False)
-    embed.add_field(name=f"🔴 Boss HP — {bh:,}/{bm:,} ({int(bp*100)}%)",value=f"```\n{bbar}\n```",inline=False)
-    embed.add_field(name="Tipo",value=type_badge(boss.get("t","?")),inline=True)
-    embed.add_field(name="⚔️ ATK",value=f"**{boss.get('atk',0):,}**",inline=True)
-    bcd=data.get("bossBallCD",0)
-    embed.add_field(name="🔮 Ball",value="Disponível" if bcd<=0 else f"⏳ {bcd} turno(s)",inline=True)
-    mon=data.get("playerMon"); mn=f"{mon.get('e','')} {mon.get('species',mon.get('n','?'))}" if mon else "Monstro Ativo"
-    sh="  🛡️ Escudo!" if data.get("bossShield",0)>0 else ""
-    if data.get("defending"): sh+="  🛡️ A defender!"
-    embed.add_field(name=f"❤️ Teu HP — {ph:,}/{pm:,}{sh}",value=f"**{mn}**\n```\n{pbar}\n```",inline=False)
-    if msg: embed.add_field(name="📋 Combate",value=msg,inline=False)
-    embed.set_footer(text=f"💰 {boss.get('reward',0):,} ouro · 🪨 {', '.join(m['n'] for m in boss.get('mats',[]))}")
-    return embed
 
 # ══════════════════════════════════════════════
 # BOT
@@ -632,21 +734,26 @@ class BattleView(discord.ui.View):
         mon=get_active_mon(data)
         if not mon or not mon.get("alive",True): await interaction.response.send_message("❌ Monstro KO! Usa `/curar` ou `/ativar`.",ephemeral=True); return
         wild=data["wild"]; refresh_mon_stats(mon)
-        at=get_type_mult(mon.get("t",""),wild.get("t","")); rt=get_type_mult(wild.get("t",""),mon.get("t",""))
+        at,effect = get_type_effect(mon.get("t",""),wild.get("t",""))
+        rt,rteffect = get_type_effect(wild.get("t",""),mon.get("t",""))
         db=1+data.get("rebirthCount",0)*0.5; xb=1.6 if data.get("xatkActive") else 1.0
         if data.get("xatkActive"): data["xatkActive"]=False
         dmg=max(1,int(mon["atkStat"]*(0.75+random.random()*0.45)*db*at*xb))
         ret=max(1,int(wild.get("atk",5)*(0.5+random.random()*0.45)*rt))
-        mon["hp"]=max(0,mon["hp"]-ret); wild["hp"]=max(0,wild["hp"]-dmg)
+        # Inimigo ataca primeiro (sincronizado com HTML)
+        mon["hp"]=max(0,mon["hp"]-ret)
+        wild["hp"]=max(0,wild["hp"]-dmg)
         data["battleBonus"]=max(-0.4,data.get("battleBonus",0)-0.08)
         gainXp(mon,8+int(wild.get("atk",5)*1.6),data)
         data["attackCooldownUntil"]=time.time()+5.0
         lines=[]
-        if at>1.2: lines.append(f"⚡ **Super eficaz!** {mon.get('e','')} causou **{dmg}** dano!")
-        elif at<0.8: lines.append(f"💧 *Pouco eficaz...* {mon.get('e','')} causou **{dmg}** dano.")
+        hint_at = get_type_hint_text(effect)
+        hint_rt = get_type_hint_text(rteffect)
+        if at>1: lines.append(f"⚡ **Super eficaz!** {mon.get('e','')} causou **{dmg}** dano!")
+        elif at<1: lines.append(f"💧 *Pouco eficaz...* {mon.get('e','')} causou **{dmg}** dano.")
         else: lines.append(f"⚔️ {mon.get('e','')} **{mon.get('species',mon.get('n','?'))}** causou **{dmg}** dano!")
-        if rt>1.2: lines.append(f"⚡ **{wild['e']} {wild['n']}** contra-atacou com **{ret}** dano! *Super eficaz!*")
-        elif rt<0.8: lines.append(f"💧 **{wild['e']} {wild['n']}** contra-atacou com **{ret}** dano. *Pouco eficaz...*")
+        if rt>1: lines.append(f"⚡ **{wild['e']} {wild['n']}** contra-atacou com **{ret}** dano! *Super eficaz!*")
+        elif rt<1: lines.append(f"💧 **{wild['e']} {wild['n']}** contra-atacou com **{ret}** dano. *Pouco eficaz...*")
         else: lines.append(f"🗡️ **{wild['e']} {wild['n']}** contra-atacou! **-{ret}** HP")
         if mon["hp"]<=0:
             mon["alive"]=False; lines.append(f"💀 **{mon.get('species',mon.get('n','?'))}** desmaiou!")
@@ -682,7 +789,7 @@ class BattleView(discord.ui.View):
             clear_wild_state(data); data["balls"]=min(99,data["balls"]+2); write_save(self.uid,data)
             pf="🌟 **Golden Ball!** " if bt=="golden" else "🔮 "
             embed=discord.Embed(title=f"✅ {wild.get('e','')} {wild['n']} Capturado!",
-                description=f"{pf}Sucesso!\n\n{type_badge(wild.get('t','?'))} · {rare_badge(wild.get('rare','comum'))}\nTier **{captured['tier']}** {tier_stars(captured['tier'])}\n❤️ **{captured['maxHp']}** · ⚔️ **{captured['atkStat']}**\n📖 **{len(data['caught'])}/{len(MONS)}**",
+                description=f"{pf}Sucesso! ({int(chance*100)}%)\n\n{type_badge(wild.get('t','?'))} · {rare_badge(wild.get('rare','comum'))}\nTier **{captured['tier']}** {tier_stars(captured['tier'])}\n❤️ **{captured['maxHp']}** · ⚔️ **{captured['atkStat']}**\n📖 **{len(data['caught'])}/{len(MONS)}**",
                 color=RARE_COLOR.get(wild.get("rare","comum"),0x888888))
             await interaction.response.edit_message(embed=embed,view=None)
         else:
@@ -742,8 +849,8 @@ class BossView(discord.ui.View):
             await interaction.response.edit_message(embed=make_boss_embed(data,"\n".join(lines)+"\n\n🐐 **LEONKING surge!**"),view=BossView(self.uid)); return True
         bn=boss["n"]
         if bn not in data["bossDefeated"]: data["bossDefeated"].append(bn)
-        rw=boss.get("reward",500); data["gold"]=data.get("gold",0)+rw
-        for mat in boss.get("mats",[]): data["materials"][mat["n"]]=data["materials"].get(mat["n"],0)+2
+        rw=boss.get("reward",500); data["gold"]=data.get("gold",0)+int(rw*0.6)
+        for mat in boss.get("mats",[]): data.setdefault("materials",{})[mat["n"]]=data["materials"].get(mat["n"],0)+1
         if mon: gainXp(mon,60,data)
         mn=f"{mon.get('e','')} {mon.get('species',mon.get('n','?'))}" if mon else "o teu monstro"
         clear_boss_state(data); write_save(self.uid,data)
@@ -760,11 +867,27 @@ class BossView(discord.ui.View):
         mon=data.get("playerMon") or get_active_mon(data)
         if not mon: await interaction.response.send_message("❌ Sem monstro!",ephemeral=True); return
         refresh_mon_stats(mon); boss=data["boss"]
-        mt=get_type_mult(mon.get("t",""),boss.get("t","")); xb=1.6 if data.get("xatkActive") else 1.0
+        mt,effect = get_type_effect(mon.get("t",""),boss.get("t","")); xb=1.6 if data.get("xatkActive") else 1.0
         if data.get("xatkActive"): data["xatkActive"]=False
-        dmg=max(1,int(mon["atkStat"]*mt*(0.85+random.random()*0.4)*xb)); data["bossHp"]=max(0,data["bossHp"]-dmg)
+        dmg=max(1,int(mon["atkStat"]*mt*(0.85+random.random()*0.4)*xb))
+        
+        # Confirmar ataque se boss < 20% (sincronizado com HTML)
+        future_hp = data["bossHp"] - dmg
+        limit_20 = data["bossMaxHp"] * 0.2
+        if not data.get("confirmAtk20") and future_hp <= limit_20 and future_hp > 0:
+            data["confirmAtk20"] = True
+            write_save(self.uid, data)
+            await interaction.response.send_message(
+                f"⚠️ O Boss está com **20% ou menos de HP**!\nQueres continuar o ataque e arriscar matá-lo?\n\n✅ Confirma com **Atacar** novamente para golpear!\n⏸️ Usa **Defender** ou **Curar** se quiseres tentar capturar.",
+                ephemeral=True
+            )
+            return
+        
+        data["confirmAtk20"] = False
+        data["bossHp"]=max(0,data["bossHp"]-dmg)
         mn=f"{mon.get('e','')} {mon.get('species',mon.get('n','?'))}"
         lines=[]
+        hint = get_type_hint_text(effect)
         if mt>1: lines.append(f"⚡ **Super eficaz!** {mn} causou **{dmg:,}**!")
         elif mt<1: lines.append(f"💧 *Pouco eficaz...* {mn} causou **{dmg:,}**.")
         else: lines.append(f"⚔️ {mn} atacou! **{dmg:,}** dano!")
@@ -783,6 +906,7 @@ class BossView(discord.ui.View):
         if interaction.user.id!=self.uid: await interaction.response.send_message("❌",ephemeral=True); return
         data=await self._chk(interaction)
         if not data: return
+        data["confirmAtk20"] = False  # Resetar confirmação ao defender
         data["defending"]=True; lines=["🛡️ A defender! Dano reduzido a **40%**."]
         boss_counterattack(data,lines)
         if data["playerHp"]<=0: await self._defeat(interaction,data,lines); return
@@ -793,6 +917,7 @@ class BossView(discord.ui.View):
         if interaction.user.id!=self.uid: await interaction.response.send_message("❌",ephemeral=True); return
         data=await self._chk(interaction)
         if not data: return
+        data["confirmAtk20"] = False  # Resetar confirmação ao capturar
         boss=data["boss"]
         if boss.get("special")=="final_boss" and data.get("finalBossPhase")==1:
             await interaction.response.send_message("🌌 A primeira forma não pode ser capturada!",ephemeral=True); return
@@ -814,7 +939,7 @@ class BossView(discord.ui.View):
             if len(data.get("team",[]))<6: data["team"].append(bmon)
             else: data["box"].append(bmon)
             data["gold"]=data.get("gold",0)+boss.get("reward",500)
-            for mat in boss.get("mats",[]): data["materials"][mat["n"]]=data["materials"].get(mat["n"],0)+2
+            for mat in boss.get("mats",[]): data.setdefault("materials",{})[mat["n"]]=data["materials"].get(mat["n"],0)+2
             clear_boss_state(data); write_save(self.uid,data)
             ex="\n\n# 🌟 CAPTURASTE O DEUS ABSOLUTO LEONKING! 🌟" if boss.get("special")=="final_boss" else ""
             embed=discord.Embed(title=f"✨ {boss['e']} {bn} CAPTURADO!",
@@ -826,11 +951,12 @@ class BossView(discord.ui.View):
         if data["playerHp"]<=0: await self._defeat(interaction,data,lines); return
         write_save(self.uid,data); await interaction.response.edit_message(embed=make_boss_embed(data,"\n".join(lines)),view=self)
 
-    @discord.ui.button(label="💊 Usar Poção",style=discord.ButtonStyle.success,row=1)
+    @discord.ui.button(label="💊 Curar (Poções)",style=discord.ButtonStyle.success,row=1)
     async def heal(self,interaction:discord.Interaction,button:discord.ui.Button):
         if interaction.user.id!=self.uid: await interaction.response.send_message("❌",ephemeral=True); return
         data=await self._chk(interaction)
         if not data: return
+        data["confirmAtk20"] = False
         items=data.get("items",{}); mhp=data.get("playerMaxHp",100); h=0; u=""; em=""
         if items.get("hyperpotion",0)>0: h=mhp; u="hyperpotion"; em="✨"
         elif items.get("megapotion",0)>0: h=int(mhp*0.5); u="megapotion"; em="💊"
@@ -875,6 +1001,8 @@ class ShopView(discord.ui.View):
             if iid=="masterball": data["masterball"]=data.get("masterball",0)+1
             elif iid=="balls5": data["balls"]=min(99,data.get("balls",0)+5)
             elif iid=="charm": data["matBonus"]=min(3,data.get("matBonus",0)+1)
+            elif iid=="incense": data["rareSpawnPassive"]=min(3,data.get("rareSpawnPassive",0)+1)
+            elif iid=="rarepotion": data.setdefault("items",{})[iid]=data["items"].get(iid,0)+1
             else: data.setdefault("items",{})[iid]=data["items"].get(iid,0)+1
             write_save(self.uid,data); await interaction.response.send_message(f"✅ {it['e']} **{it['n']}** comprado! 💰 **{data['gold']}** restante.",ephemeral=True)
         return cb
@@ -887,7 +1015,7 @@ class ShopView(discord.ui.View):
         return embed
 
 # ══════════════════════════════════════════════
-# VIEW DA POKÉDEX (botão boss final integrado)
+# VIEW DA POKÉDEX
 # ══════════════════════════════════════════════
 
 class PokedexView(discord.ui.View):
@@ -917,13 +1045,12 @@ class PokedexView(discord.ui.View):
 @tree.command(name="caçar",description="Encontra um monstro selvagem (10% chance de boss!)")
 async def hunt(interaction:discord.Interaction):
     uid=interaction.user.id; data=load_clean_save(uid)
-    # Limpar batalhas corrompidas
     if data.get("inBattle") and not data.get("wild"): clear_wild_state(data); write_save(uid,data)
     if data.get("inBossBattle") and (not data.get("boss") or data.get("bossHp",0)<=0): clear_boss_state(data); write_save(uid,data)
     if data.get("inBattle"): await interaction.response.send_message("⚔️ Já estás em batalha! Termina primeiro.",ephemeral=True); return
     if data.get("inBossBattle"): await interaction.response.send_message("👹 Já estás em batalha de boss!",ephemeral=True); return
     mon=get_active_mon(data); has_mon=bool(mon and mon.get("alive",True))
-    # Boss pendente (ritual/nico)
+    # Boss pendente
     pending=data.get("pendingBoss")
     if pending and has_mon:
         boss=BOSS_INDEX.get(pending)
@@ -932,7 +1059,7 @@ async def hunt(interaction:discord.Interaction):
             embed=discord.Embed(title=f"⚠️ BOSS APARECEU! {boss['e']} {boss['n']}",
                 description=f"*{boss.get('title','?')}*\n\n{type_badge(boss.get('t','?'))}\n❤️ HP: **{data['bossHp']:,}** · ⚔️ ATK: **{boss['atk']:,}**\n💰 **{boss.get('reward',0):,}** ouro",color=0x8a0020)
             await interaction.response.send_message(embed=embed,view=BossView(uid)); return
-    # 10% boss aleatório
+    # 10% boss aleatório (com repelente check)
     repel=data.get("bossRepelUntil",0)>time.time()
     if has_mon and not repel and data.get("battles",0)>0 and random.random()<0.10:
         boss=roll_random_boss(data)
@@ -942,7 +1069,7 @@ async def hunt(interaction:discord.Interaction):
                 description=f"*{boss.get('title','?')}*\n\n{type_badge(boss.get('t','?'))}\n❤️ HP: **{data['bossHp']:,}** · ⚔️ ATK: **{boss['atk']:,}**\n💰 **{boss.get('reward',0):,}** ouro",color=0x8a0020)
             await interaction.response.send_message(embed=embed,view=BossView(uid)); return
     # Monstro selvagem
-    wild=generate_wild_mon(forced_rarity=data.get("forcedRarity"),forced_type=data.get("forcedType"))
+    wild=generate_wild_mon(forced_rarity=data.get("forcedRarity"),forced_type=data.get("forcedType"),data=data)
     data["forcedRarity"]=None; data["forcedType"]=None
     data["wild"]=wild; data["inBattle"]=True; data["battleBonus"]=0
     data["attackCooldownUntil"]=0; data["battles"]=data.get("battles",0)+1
@@ -1075,7 +1202,7 @@ async def use_item(interaction:discord.Interaction,item:str):
     elif iid=="xatk": data["xatkActive"]=True; msg="💢 **X-Ataque** ativo! Próximo ataque +60%."
     elif iid=="raredecoy": data["forcedRarity"]="raro"; msg="🧲 Próximo monstro será **Raro** ou superior!"
     elif iid=="epicdecoy": data["forcedRarity"]="épico"; msg="💎 Próximo monstro será **Épico** ou superior!"
-    elif iid=="rarepotion": msg="💜 **Poção Rara** pronta! +30% captura em raros+."
+    elif iid=="rarepotion": data["rareCatchBonus"]=data.get("rareCatchBonus",0)+0.30; msg="💜 **Poção Rara** pronta! +30% captura em raros+."
     elif iid=="incense": data["rareSpawnPassive"]=min(3,data.get("rareSpawnPassive",0)+1); msg=f"🎁 **Incenso Raro** ativo! Bónus: **{data['rareSpawnPassive']}**"
     elif iid=="repelent": data["bossRepelUntil"]=time.time()+5*60; msg="🕊️ **Repelente** ativo por 5 minutos!"
     elif iid=="dragoball": msg="🔴 **Drago Ball** pronta! +40% em Dragões/Fantasmas/Arcanos."
@@ -1178,10 +1305,10 @@ async def rebirth(interaction:discord.Interaction):
     uid=interaction.user.id; data=load_clean_save(uid)
     if data.get("gold",0)<10000: await interaction.response.send_message(f"❌ Precisas de 💰**10.000**. Tens **{data.get('gold',0)}**.",ephemeral=True); return
     data["gold"]-=10000; data["rebirthCount"]=data.get("rebirthCount",0)+1; rb=data["rebirthCount"]
-    data["balls"]=10+rb*2; data["items"]={}; data["materials"]=[]; data["level"]=1
+    data["balls"]=10+rb*2; data["items"]={}; data["materials"]={}; data["level"]=1
     write_save(uid,data)
     await interaction.response.send_message(embed=discord.Embed(title=f"🌀 Rebirth #{rb}!",
-        description=f"**Renasceste mais forte!**\n\n✨ XP e drops **×{1+rb}**\n🔮 Balls: **{data['balls']}**\n💪 Monstros mantidos!",color=0x8e44ad))
+        description=f"**Renasceste mais forte!**\n\n✨ Bónus **+{int(rb*50)}%** em HP/ATK e dano do Monster Lutar\n🔮 Balls: **{data['balls']}**\n💪 Monstros mantidos!",color=0x8e44ad))
 
 @tree.command(name="perfil",description="Vê o teu perfil")
 async def profile(interaction:discord.Interaction):
@@ -1219,9 +1346,9 @@ async def help_cmd(interaction:discord.Interaction):
     embed.add_field(name="⚔️ Batalha Selvagem",
         value="⚔️ **Lutar** — Ataca (cooldown 5s, inimigo contra-ataca simultaneamente!)\n🔮 **Ball** — Tenta capturar\n⭐ **Master Ball** — Captura garantida\n🏃 **Fugir**",inline=False)
     embed.add_field(name="👹 Batalha de Boss",
-        value="⚔️ Atacar · 🛡️ Defender (-60% dano) · 🔮 Ball (cd 3 turnos) · 💊 Poção · 🏃 Retirar\n⚠️ A cada 3 turnos o boss carrega **Ataque Especial** (x1.8)!",inline=False)
+        value="⚔️ Atacar · 🛡️ Defender (-60% dano) · 🔮 Ball (cd 3 turnos) · 💊 Poção · 🏃 Retirar\n⚠️ A cada 3 turnos o boss carrega **Ataque Especial** (x1.8)!\n⚠️ Confirmação extra ao atacar boss <20% HP!",inline=False)
     embed.add_field(name="🤫 Segredos",
-        value="🐈 **Nico** — Usa 3 Poções no **OXIGÉNIO** → `/caçar`\n👑 **Void King** — Só com Master Ball\n🌌 **Boss Final** — Pokédex completa → botão em `/pokedex`\n🐐 **Leonking** — Fase 2 do Boss Final",inline=False)
+        value="🐈 **Nico** — Usa 3 Poções no **OXIGÉNIO** → `/caçar`\n👑 **Void King** — Só com Master Ball\n🌌 **Boss Final** — Pokédex completa → botão em `/pokedex`\n🐐 **Leonking** — Fase 2 do Boss Final\n📡 **Detector de Tipos** — Revela tipo do próximo monstro",inline=False)
     await interaction.response.send_message(embed=embed)
 
 # ══════════════════════════════════════════════
