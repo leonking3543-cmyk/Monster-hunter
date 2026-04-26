@@ -714,13 +714,25 @@ class BattleView(discord.ui.View):
     def _sync(self):
         data=load_clean_save(self.uid)
         cd=max(0,int(math.ceil(data.get("attackCooldownUntil",0)-time.time())))
-        mon=get_active_mon(data); can=bool(mon and mon.get("alive",True))
+        mon=get_active_mon(data)
+        can_fight=True  # Lutar sempre disponível (jogador ataca sozinho)
+        can_monster=bool(mon and mon.get("alive",True))  # Monster Fight só com monstro vivo
+        
+        # Atualizar labels dos botões
         for c in self.children:
             cid=getattr(c,"custom_id","")
-            if cid=="fight_mon": c.label=f"⚔️ Lutar ({cd}s)" if cd>0 else "⚔️ Lutar"; c.disabled=cd>0 or not can
-            elif cid=="throw_ball": c.label=f"🔮 Ball ({data.get('balls',0)})"; c.disabled=data.get("balls",0)<=0
-            elif cid=="throw_master": c.label=f"⭐ Master ({data.get('masterball',0)})"; c.disabled=data.get("masterball",0)<=0
-            elif cid=="monster_fight": c.label="🐾 Monster Fight"; c.disabled=not can
+            if cid=="fight_mon":
+                c.label=f"⚔️ Lutar ({cd}s)" if cd>0 else "⚔️ Lutar"
+                c.disabled=(cd>0)  # Só bloqueia pelo cooldown, não pelo monstro
+            elif cid=="throw_ball":
+                c.label=f"🔮 Ball ({data.get('balls',0)})"
+                c.disabled=(data.get("balls",0)<=0)
+            elif cid=="throw_master":
+                c.label=f"⭐ Master ({data.get('masterball',0)})"
+                c.disabled=(data.get("masterball",0)<=0)
+            elif cid=="monster_fight":
+                c.label="🐾 Monster Fight"
+                c.disabled=not can_monster  # Só ativo com monstro vivo
         
         # Sistema de ataques automáticos do inimigo a cada 10 segundos
         if data.get("inBattle") and data.get("wild"):
