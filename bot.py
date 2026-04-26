@@ -533,7 +533,6 @@ def make_wild_embed(wild,data,msg=""):
         cd=max(0,int(math.ceil(data.get("attackCooldownUntil",0)-time.time())))
         cd_txt=f"⏳ Ataque em **{cd}s**" if cd>0 else "⚔️ Pronto para atacar!"
         sp=mon.get("species",mon.get("n","?"))
-        # Calcular penalidade de nível para mostrar no HUD
         lv_penalty = get_team_level_catch_penalty(data)
         penalty_pct = int((1 - 1/lv_penalty) * 100) if lv_penalty > 1 else 0
         penalty_txt = f" 🔒 Captura -{penalty_pct}%" if penalty_pct > 5 else ""
@@ -542,9 +541,9 @@ def make_wild_embed(wild,data,msg=""):
     else:
         embed.add_field(name="⚔️ Sem Monstro Ativo",value="Usa 🔮 Ball para capturar o teu primeiro monstro!",inline=False)
     
-    enemy_hits = data.get("enemyHits", 0)
-    max_hits = 3 if is_nightmare_mode(data) else 5
-    footer = f"⚔️ Lutar tem cooldown 5s · 🐾 Monster Fight disponível · ⚠️ Inimigo ataca a cada 10s ({enemy_hits}/{max_hits} ataques para fugir) · 🏃 Fugir"
+    enemy_hits=data.get("enemyHits",0)
+    max_hits=3 if is_nightmare_mode(data) else 5
+    footer=f"⚔️ Lutar tem cooldown 5s · 🐾 Monster Fight disponível · ⚠️ Inimigo ataca a cada 10s ({enemy_hits}/{max_hits} ataques para fugir) · 🏃 Fugir"
     embed.set_footer(text=footer)
     return embed
 
