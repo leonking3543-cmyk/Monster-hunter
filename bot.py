@@ -516,30 +516,34 @@ def rare_badge(r): return f"{RARE_EMOJI.get(r,'❓')} `{r.upper()}`"
 def tier_stars(t): return ["","★","★★","★★★","★★★★","★★★★★"][min(t,5)]
 
 def make_wild_embed(wild,data,msg=""):
-    rare=wild.get("rare","comum"); color=RARE_COLOR.get(rare,0x888888)
-    hp=wild.get("hp",0); mhp=wild.get("maxHp",1); pct=hp/max(1,mhp); bar=hp_bar(pct)
+    rare=wild.get("rare","comum")
+    color=RARE_COLOR.get(rare,0x888888)
+    hp=wild.get("hp",0)
+    mhp=wild.get("maxHp",1)
+    pct=hp/max(1,mhp)
+    bar=hp_bar(pct)
     embed=discord.Embed(title="⚔️ Batalha Selvagem",color=color)
     embed.add_field(name="💰 Ouro",value=f"**{data.get('gold',0)}**",inline=True)
     embed.add_field(name="🔮 Balls",value=f"**{data.get('balls',0)}**",inline=True)
     embed.add_field(name="⭐ Master",value=f"**{data.get('masterball',0)}**",inline=True)
-    embed.add_field(name=f"{wild['e']} **{wild['n']}**",
-        value=f"{type_badge(wild.get('t','?'))} · {rare_badge(rare)}\nHP: **{hp}/{mhp}**\n{bar}\n⚔️ ATK: **{wild.get('atk','?')}**",inline=False)
-    if msg: embed.add_field(name="📋 Log",value=msg,inline=False)
+    embed.add_field(name=f"{wild['e']} **{wild['n']}**",value=f"{type_badge(wild.get('t','?'))} · {rare_badge(rare)}\nHP: **{hp}/{mhp}**\n{bar}\n⚔️ ATK: **{wild.get('atk','?')}**",inline=False)
+    if msg:
+        embed.add_field(name="📋 Log",value=msg,inline=False)
     mon=get_active_mon(data)
     if mon:
         refresh_mon_stats(mon)
-        mpct=mon["hp"]/max(1,mon["maxHp"]); mbar=hp_bar(mpct,10)
+        mpct=mon["hp"]/max(1,mon["maxHp"])
+        mbar=hp_bar(mpct,10)
         alive="💚" if mon.get("alive",True) else "💀"
         cd=max(0,int(math.ceil(data.get("attackCooldownUntil",0)-time.time())))
         cd_txt=f"⏳ Ataque em **{cd}s**" if cd>0 else "⚔️ Pronto para atacar!"
         sp=mon.get("species",mon.get("n","?"))
-        embed.add_field(name=f"{alive} {mon.get('e','')} **{sp}** — Lv.{mon.get('level',1)} {tier_stars(mon.get('tier',1))}",
-            value=f"{type_badge(mon.get('t','?'))}\n❤️ **{mon['hp']}/{mon['maxHp']}** · ⚔️ **{mon.get('atkStat','?')}**\n{mbar}\n{cd_txt}",inline=False)
+        embed.add_field(name=f"{alive} {mon.get('e','')} **{sp}** — Lv.{mon.get('level',1)} {tier_stars(mon.get('tier',1))}",value=f"{type_badge(mon.get('t','?'))}\n❤️ **{mon['hp']}/{mon['maxHp']}** · ⚔️ **{mon.get('atkStat','?')}**\n{mbar}\n{cd_txt}",inline=False)
     else:
         embed.add_field(name="⚔️ Sem Monstro Ativo",value="Usa 🔮 Ball para capturar o teu primeiro monstro!",inline=False)
-    enemy_hits = data.get("enemyHits", 0)
-    max_hits = 3 if is_nightmare_mode(data) else 5
-    embed.set_footer(text=f"⚔️ Lutar tem cooldown 5s · 🐾 Monster Fight disponível · ⚠️ Inimigo ataca a cada 10s ({enemy_hits}/{max_hits} ataques para fugir) · 🏃 Fugir")
+    enemy_hits=data.get("enemyHits",0)
+    max_hits=3 if is_nightmare_mode(data) else 5
+    embed.set_footer(text=f"⚔️ Lutar tem cooldown 5s · 🐾 Monster Fight · ⚠️ Inimigo ataca a cada 10s ({enemy_hits}/{max_hits}) · 🏃 Fugir")
     return embed
 
 def make_boss_embed(data,msg=""):
@@ -725,25 +729,25 @@ class BattleView(discord.ui.View):
             elif cid=="throw_master":
                 c.label=f"⭐ Master ({data.get('masterball',0)})"
                 c.disabled=(data.get("masterball",0)<=0)
-        elif cid=="monster_fight":
+            elif cid=="monster_fight":
                 c.label="🐾 Monster Fight"
                 c.disabled=not can_monster
         if data.get("inBattle") and data.get("wild"):
-            now = time.time()
-            last_atk = data.get("lastEnemyAtk", 0)
-            if now - last_atk >= 10:
-                mon2 = get_active_mon(data)
-                wild2 = data["wild"]
-                if mon2 and mon2.get("alive", True):
-                    dmg = max(1, int(wild2.get("atk", 5) * (0.5 + random.random() * 0.45)))
-                    mon2["hp"] = max(0, mon2["hp"] - dmg)
-                data["enemyHits"] = data.get("enemyHits", 0) + 1
-                data["lastEnemyAtk"] = now
-                max_hits = 3 if is_nightmare_mode(data) else 5
-                if data["enemyHits"] >= max_hits:
-                    data["wild"] = None
+            now=time.time()
+            last_atk=data.get("lastEnemyAtk",0)
+            if now-last_atk>=10:
+                mon2=get_active_mon(data)
+                wild2=data["wild"]
+                if mon2 and mon2.get("alive",True):
+                    dmg=max(1,int(wild2.get("atk",5)*(0.5+random.random()*0.45)))
+                    mon2["hp"]=max(0,mon2["hp"]-dmg)
+                data["enemyHits"]=data.get("enemyHits",0)+1
+                data["lastEnemyAtk"]=now
+                max_hits=3 if is_nightmare_mode(data) else 5
+                if data["enemyHits"]>=max_hits:
+                    data["wild"]=None
                     clear_wild_state(data)
-                write_save(self.uid, data)
+                write_save(self.uid,data)
         return data
 
     async def _chk(self,interaction):
