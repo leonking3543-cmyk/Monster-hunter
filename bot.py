@@ -729,7 +729,7 @@ tree=bot.tree
 # VIEW BATALHA SELVAGEM - VERSÃO FINAL FUNCIONAL
 # ══════════════════════════════════════════════
 
-class BattleView(discord.ui.View):
+cclass BattleView(discord.ui.View):
     def __init__(self, uid, timeout=180):
         super().__init__(timeout=timeout)
         self.uid = uid
@@ -741,47 +741,32 @@ class BattleView(discord.ui.View):
         write_save(self.uid, data)
 
     def _update_buttons(self, data):
-        cd = max(0, int(math.ceil(data.get("attackCooldownUntil", 0) - time.time())))
         mon = get_active_mon(data)
         can_fight = bool(mon and mon.get("alive", True))
+        
+        # Nova lógica: ataque fica bloqueado até usar outra ação
+        attack_blocked = data.get("attackBlocked", False)
 
         for child in self.children:
             cid = getattr(child, "custom_id", "")
+            
             if cid == "fight_mon":
-                child.label = f"⚔️ Lutar ({cd}s)" if cd > 0 else "⚔️ Lutar"
-                child.disabled = cd > 0
+                child.label = "⚔️ Lutar (em espera)" if attack_blocked else "⚔️ Lutar"
+                child.disabled = attack_blocked or not can_fight
+                
             elif cid == "monster_fight":
-                child.disabled = not can_fight
+                child.disabled = not can_fight or attack_blocked
+                
             elif cid == "throw_ball":
                 child.label = f"🔮 Ball ({data.get('balls', 0)})"
                 child.disabled = data.get("balls", 0) <= 0
+                
             elif cid == "throw_master":
                 child.label = f"⭐ Master ({data.get('masterball', 0)})"
                 child.disabled = data.get("masterball", 0) <= 0
+            # "Fugir" não precisa de mudança aqui
 
-    def _process_enemy_attack(self, data):
-        if not data.get("wild"): 
-            return False
-        now = time.time()
-        if now - data.get("lastEnemyAtk", 0) < 10:
-            return False
-
-        mon = get_active_mon(data)
-        wild = data.get("wild")
-        if not mon or not mon.get("alive", True) or not wild:
-            return False
-
-        dmg = max(1, int(wild.get("atk", 5) * random.uniform(0.55, 0.95)))
-        mon["hp"] = max(0, mon["hp"] - dmg)
-
-        data["enemyHits"] = data.get("enemyHits", 0) + 1
-        data["lastEnemyAtk"] = now
-
-        if data["enemyHits"] >= (3 if is_nightmare_mode(data) else 5):
-            clear_wild_state(data)
-            return True
-        return True
-
+    # ====================== BOTÃO LUTAR ======================
     @discord.ui.button(label="⚔️ Lutar", style=discord.ButtonStyle.danger, custom_id="fight_mon", row=0)
     async def fight_mon(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.uid:
@@ -793,11 +778,11 @@ class BattleView(discord.ui.View):
             await interaction.response.edit_message(content="❌ Sem batalha ativa. Usa `/caçar`.", embed=None, view=None)
             return
 
-        cd = max(0, int(math.ceil(data.get("attackCooldownUntil", 0) - time.time())))
-        if cd > 0:
-            await interaction.response.send_message(f"⏳ Aguarda **{cd}s** para atacar!", ephemeral=True)
+        if data.get("attackBlocked", False):
+            await interaction.response.send_message("⏳ Usa outra ação primeiro para poderes atacar novamente!", ephemeral=True)
             return
 
+        # Processa ataque do inimigo (se for wild)
         self._process_enemy_attack(data)
 
         wild = data["wild"]
@@ -830,7 +815,8 @@ class BattleView(discord.ui.View):
 
             gainXp(mon, 8 + int(wild.get("atk", 5) * 1.6), data)
 
-        data["attackCooldownUntil"] = time.time() + 5.0
+        # BLOQUEIA o ataque até usar outra ação
+        data["attackBlocked"] = True
 
         if wild.get("hp", 0) <= 0:
             wild["hp"] = 0
@@ -849,10 +835,12 @@ class BattleView(discord.ui.View):
             view=self
         )
 
+    # ====================== MONSTER FIGHT (mantido igual) ======================
     @discord.ui.button(label="🐾 Monster Fight", style=discord.ButtonStyle.success, custom_id="monster_fight", row=0)
     async def monster_fight(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.fight_mon(interaction, button)
 
+    # ====================== BALL ======================
     @discord.ui.button(label="🔮 Ball", style=discord.ButtonStyle.primary, custom_id="throw_ball", row=0)
     async def throw_ball(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.uid:
@@ -878,8 +866,8 @@ class BattleView(discord.ui.View):
                 data.setdefault("caught", []).append(wild["n"])
             clear_wild_state(data)
             data["balls"] = min(99, data.get("balls", 0) + 2)
-            self._save(data)
 
+            self._save(data)
             embed = discord.Embed(
                 title=f"✅ {wild.get('e','')} {wild['n']} Capturado!",
                 description=f"Sucesso! ({int(chance*100)}%)\n{type_badge(wild.get('t','?'))} · {rare_badge(wild.get('rare','comum'))}",
@@ -887,21 +875,27 @@ class BattleView(discord.ui.View):
             )
             await interaction.response.edit_message(embed=embed, view=None)
         else:
+            # Reset do ataque quando a bola falha
+            data["attackBlocked"] = False
             self._save(data)
+            self._update_buttons(data)
             await interaction.response.edit_message(
                 embed=make_wild_embed(wild, data, "💥 A bola falhou! Chance: " + str(int(chance*100)) + "%"),
                 view=self
             )
 
+    # ====================== MASTER BALL ======================
     @discord.ui.button(label="⭐ Master", style=discord.ButtonStyle.success, custom_id="throw_master", row=0)
     async def throw_master(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.uid:
             await interaction.response.send_message("❌ Não é a tua batalha!", ephemeral=True)
             return
+
         data = self._get_data()
         if not data.get("inBattle") or not data.get("wild"):
             await interaction.response.edit_message(content="❌ Sem batalha.", embed=None, view=None)
             return
+
         if data.get("masterball", 0) <= 0:
             await interaction.response.send_message("❌ Sem Master Ball!", ephemeral=True)
             return
@@ -912,17 +906,27 @@ class BattleView(discord.ui.View):
         if wild["n"] not in data.get("caught", []):
             data.setdefault("caught", []).append(wild["n"])
         clear_wild_state(data)
-        self._save(data)
 
-        embed = discord.Embed(title=f"⭐ {wild.get('e','')} {wild['n']} Capturado!", description="Captura garantida!", color=0xffd700)
+        # Reset do ataque
+        data["attackBlocked"] = False
+
+        self._save(data)
+        embed = discord.Embed(
+            title=f"⭐ {wild.get('e','')} {wild['n']} Capturado!", 
+            description="Captura garantida!", 
+            color=0xffd700
+        )
         await interaction.response.edit_message(embed=embed, view=None)
 
+    # ====================== FUGIR ======================
     @discord.ui.button(label="🏃 Fugir", style=discord.ButtonStyle.secondary, custom_id="flee", row=1)
     async def flee(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.uid:
             await interaction.response.send_message("❌ Não é a tua batalha!", ephemeral=True)
             return
+
         data = self._get_data()
+        data["attackBlocked"] = False   # limpa o bloqueio
         clear_wild_state(data)
         self._save(data)
         await interaction.response.edit_message(content="🏃 Fugiste da batalha!", embed=None, view=None)
@@ -931,6 +935,7 @@ class BattleView(discord.ui.View):
         try:
             data = self._get_data()
             if data.get("inBattle"):
+                data["attackBlocked"] = False
                 clear_wild_state(data)
                 self._save(data)
         except:
