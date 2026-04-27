@@ -750,7 +750,7 @@ class BattleView(discord.ui.View):
             self._enemy_task.cancel()
 
     async def _cooldown_refresh(self, seconds: float):
-        """Após o cooldown expirar, edita a mensagem para reativar o botão."""
+        """Aguarda o cooldown e reativa o botão automaticamente."""
         try:
             await asyncio.sleep(seconds)
             if not self.message:
@@ -758,9 +758,12 @@ class BattleView(discord.ui.View):
             data = self._get_data()
             if not data.get("inBattle") or not data.get("wild"):
                 return
+            # Limpa o cooldown no save para o botão ficar disponível
+            data["attackCooldownUntil"] = 0
+            self._save(data)
             self._update_buttons(data)
             await self.message.edit(
-                embed=make_wild_embed(data["wild"], data, "⚔️ Ataque disponível!"),
+                embed=make_wild_embed(data["wild"], data, "⚔️ Podes atacar novamente!"),
                 view=self
             )
         except asyncio.CancelledError:
@@ -769,7 +772,7 @@ class BattleView(discord.ui.View):
             print(f"[cooldown_refresh] erro: {e}")
 
     async def _enemy_auto_attack(self, delay: float):
-        """Após o delay, o inimigo ataca automaticamente."""
+        """Após o delay, o inimigo ataca automaticamente e agenda o próximo."""
         try:
             await asyncio.sleep(delay)
             if not self.message:
@@ -779,27 +782,35 @@ class BattleView(discord.ui.View):
                 return
 
             wild = data["wild"]
+            # get_active_mon devolve referência dentro de data["team"] — alterações são guardadas
             mon = get_active_mon(data)
             lines = []
 
-            # Ataque automático do inimigo
             if mon and mon.get("alive", True):
                 refresh_mon_stats(mon)
                 ret = max(1, int(wild.get("atk", 5) * random.uniform(0.6, 1.1)))
                 mon["hp"] = max(0, mon["hp"] - ret)
-                lines.append(f"⏰ **{wild['n']}** atacou automaticamente! **-{ret}** HP")
+                lines.append(f"⏰ **{wild['n']}** atacou! **-{ret}** HP ao teu monstro!")
 
                 if mon["hp"] <= 0:
                     mon["alive"] = False
                     lines.append("💀 Teu monstro desmaiou!")
                     clear_wild_state(data)
                     self._save(data)
-                    self._update_buttons(data)
+                    # Cancela a task do cooldown também
+                    if self._cd_task and not self._cd_task.done():
+                        self._cd_task.cancel()
                     await self.message.edit(
-                        embed=discord.Embed(title="💀 Monstro Desmaiou!", description="\n".join(lines), color=0xff0000),
+                        embed=discord.Embed(
+                            title="💀 Monstro Desmaiou!",
+                            description="\n".join(lines),
+                            color=0xff0000
+                        ),
                         view=None
                     )
                     return
+            else:
+                lines.append(f"⏰ **{wild['n']}** tentou atacar mas não tens monstro ativo!")
 
             self._save(data)
             self._update_buttons(data)
@@ -807,7 +818,7 @@ class BattleView(discord.ui.View):
                 embed=make_wild_embed(wild, data, "\n".join(lines)),
                 view=self
             )
-            # Agenda próximo ataque automático
+            # Agenda próximo ataque automático (só se a batalha ainda estiver ativa)
             self._enemy_task = asyncio.create_task(self._enemy_auto_attack(10))
         except asyncio.CancelledError:
             pass
@@ -1160,6 +1171,8 @@ async def hunt(interaction:discord.Interaction):
     view=BattleView(uid)
     await interaction.response.send_message(embed=make_wild_embed(wild,data,f"Um **{wild['n']}** selvagem apareceu!"),view=view)
     view.message=await interaction.original_response()
+    # Inicia ataque automático do inimigo desde o início (a cada 10s)
+    view._enemy_task=asyncio.create_task(view._enemy_auto_attack(10))
 
 @tree.command(name="equipa",description="Vê a tua equipa")
 async def team_cmd(interaction:discord.Interaction):
