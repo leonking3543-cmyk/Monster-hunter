@@ -334,19 +334,20 @@ def get_nightmare_mult(data):
     count = sum(1 for m in (data.get("team",[])+data.get("box",[])) if m.get("level",1) >= 1000)
     return 1 + min(count * 0.5, 4)
 
-def generate_wild_mon(forced_rarity=None,forced_type=None,data=None):
+def generate_wild_mon(forced_rarity=None, forced_type=None, data=None):
     """Gera monstro selvagem com suporte a iscas e modo pesadelo"""
     # Isco de raridade
     if forced_rarity:
-        rord=["comum","incomum","raro","épico","lendário","mítico","divino","Divino"]
-        mi=rord.index(forced_rarity) if forced_rarity in rord else 0
-        elig=[p for p in RARITY_PLAN if rord.index(p["rare"])>=mi]
-        plan=random.choice(elig) if elig else random.choice(RARITY_PLAN)
+        rord = ["comum", "incomum", "raro", "épico", "lendário", "mítico", "divino", "Divino"]
+        try:
+            mi = rord.index(forced_rarity)
+            elig = [p for p in RARITY_PLAN if rord.index(p["rare"]) >= mi]
+            plan = random.choice(elig) if elig else random.choice(RARITY_PLAN)
+        except ValueError:
+            plan = random.choice(RARITY_PLAN)
     else:
-        # Pesos de raridade (sincronizados com HTML)
-        wm={"comum":12,"incomum":7,"raro":4.5,"épico":2.2,"lendário":1,"mítico":0.5}
+        wm = {"comum": 12, "incomum": 7, "raro": 4.5, "épico": 2.2, "lendário": 1, "mítico": 0.5}
         if data:
-            # Ajuste de spawn baseado em incenso raro
             stacks = data.get("rareSpawnPassive", 0)
             if stacks > 0:
                 wm["comum"] = max(1, wm["comum"] - stacks * 1.44)
@@ -355,29 +356,50 @@ def generate_wild_mon(forced_rarity=None,forced_type=None,data=None):
                 wm["épico"] = min(15, wm["épico"] + stacks * 1.21)
                 wm["lendário"] = min(10, wm["lendário"] + stacks * 0.8)
                 wm["mítico"] = min(8, wm["mítico"] + stacks * 0.55)
-        pw=[(p,wm.get(p["rare"],5)) for p in RARITY_PLAN]
-        tot=sum(w for _,w in pw); rnd=random.random()*tot
-        plan=RARITY_PLAN[-1]
-        for p,w in pw:
-            rnd-=w
-            if rnd<=0: plan=p; break
-    td=next((t for t in TYPE_DEFS if t["t"]==forced_type),None) if forced_type else random.choice(TYPE_DEFS)
-    if not td: td=random.choice(TYPE_DEFS)
-    idx=RARITY_PLAN.index(plan)
-    name=td["names"][min(idx,len(td["names"])-1)]
-    emoji=td["emojis"][idx%len(td["emojis"])]
+
+        pw = [(p, wm.get(p["rare"], 5)) for p in RARITY_PLAN]
+        tot = sum(w for _, w in pw)
+        rnd = random.random() * tot
+        plan = RARITY_PLAN[-1]
+        for p, w in pw:
+            rnd -= w
+            if rnd <= 0:
+                plan = p
+                break
+
+    # Escolher tipo
+    if forced_type:
+        td = next((t for t in TYPE_DEFS if t["t"] == forced_type), None)
+    else:
+        td = random.choice(TYPE_DEFS)
+
+    if not td:
+        td = random.choice(TYPE_DEFS)
+
+    idx = RARITY_PLAN.index(plan)
+    name = td["names"][min(idx, len(td["names"]) - 1)]
+    emoji = td["emojis"][idx % len(td["emojis"])]
+
     wild = {
-        "n":name,"t":td["t"],"e":emoji,"rare":plan["rare"],
-        "hp":max(1,plan["hp"]+td["hpMod"]),"maxHp":max(1,plan["hp"]+td["hpMod"]),
-        "atk":max(1,plan["atk"]+td["atkMod"]),"catch":plan["catch"],
-        "color":td["c"],"mats":[{"n":f"{td['mat']} {td['t']}","v":plan["mat"]}],
+        "n": name,
+        "t": td["t"],
+        "e": emoji,
+        "rare": plan["rare"],
+        "hp": max(1, plan["hp"] + td["hpMod"]),
+        "maxHp": max(1, plan["hp"] + td["hpMod"]),
+        "atk": max(1, plan["atk"] + td["atkMod"]),
+        "catch": plan["catch"],
+        "color": td["c"],
+        "mats": [{"n": f"{td['mat']} {td['t']}", "v": plan["mat"]}],
     }
+
     # Aplicar modo pesadelo
     if data and is_nightmare_mode(data):
         nm = get_nightmare_mult(data)
         wild["hp"] = int(wild["hp"] * nm)
         wild["maxHp"] = wild["hp"]
         wild["atk"] = int(wild["atk"] * nm)
+
     return wild
 
 def active_mon_capture_bonus(mon):
