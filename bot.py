@@ -735,58 +735,51 @@ class BattleView(discord.ui.View):
         self.uid = uid
 
     def _get_data(self):
-        """Carrega e limpa os dados"""
-        data = load_clean_save(self.uid)
-        return data
+        """Carrega dados limpos"""
+        return load_clean_save(self.uid)
+
+    def _save(self, data):
+        """Guarda os dados"""
+        write_save(self.uid, data)
 
     def _update_buttons(self, data):
-        """Atualiza o estado dos botões"""
+        """Atualiza estado dos botões (cooldown)"""
         cd = max(0, int(math.ceil(data.get("attackCooldownUntil", 0) - time.time())))
         mon = get_active_mon(data)
-        can_monster = bool(mon and mon.get("alive", True))
+        can_fight = bool(mon and mon.get("alive", True))
 
-        for c in self.children:
-            cid = getattr(c, "custom_id", "")
+        for child in self.children:
+            cid = getattr(child, "custom_id", "")
             if cid == "fight_mon":
-                c.label = f"⚔️ Lutar ({cd}s)" if cd > 0 else "⚔️ Lutar"
-                c.disabled = (cd > 0)
-            elif cid == "throw_ball":
-                c.label = f"🔮 Ball ({data.get('balls', 0)})"
-                c.disabled = (data.get("balls", 0) <= 0)
-            elif cid == "throw_master":
-                c.label = f"⭐ Master ({data.get('masterball', 0)})"
-                c.disabled = (data.get("masterball", 0) <= 0)
+                child.label = f"⚔️ Lutar ({cd}s)" if cd > 0 else "⚔️ Lutar"
+                child.disabled = (cd > 0)
             elif cid == "monster_fight":
-                c.label = "🐾 Monster Fight"
-                c.disabled = not can_monster
+                child.disabled = not can_fight
+            elif cid == "throw_ball":
+                child.label = f"🔮 Ball ({data.get('balls', 0)})"
+                child.disabled = data.get("balls", 0) <= 0
+            elif cid == "throw_master":
+                child.label = f"⭐ Master ({data.get('masterball', 0)})"
+                child.disabled = data.get("masterball", 0) <= 0
 
-    async def _check_battle(self, interaction):
-        data = self._get_data()
-        if not data.get("inBattle") or not data.get("wild"):
-            try:
-                await interaction.response.edit_message(
-                    content="❌ Sem batalha ativa. Usa `/caçar`.",
-                    embed=None, view=None
-                )
-            except:
-                pass
-            return None
-        return data
-
-    # ====================== LÓGICA DE ATAQUE DO INIMIGO ======================
     def _process_enemy_attack(self, data):
-        """Processa o ataque automático do monstro selvagem"""
+        """Processa ataque automático do inimigo selvagem a cada 10s"""
+        if not data.get("wild"):
+            return False
+
         now = time.time()
         last_atk = data.get("lastEnemyAtk", 0)
+
         if now - last_atk < 10:
-            return False  # Ainda não passou 10s
+            return False  # Ainda não é hora
 
         mon = get_active_mon(data)
         wild = data["wild"]
-        if not mon or not mon.get("alive", True) or not wild:
+        if not mon or not mon.get("alive", True):
             return False
 
-        dmg = max(1, int(wild.get("atk", 5) * (0.5 + random.random() * 0.45)))
+        # Inimigo ataca
+        dmg = max(1, int(wild.get("atk", 5) * random.uniform(0.5, 0.95)))
         mon["hp"] = max(0, mon["hp"] - dmg)
 
         data["enemyHits"] = data.get("enemyHits", 0) + 1
@@ -794,81 +787,97 @@ class BattleView(discord.ui.View):
 
         max_hits = 3 if is_nightmare_mode(data) else 5
         if data["enemyHits"] >= max_hits:
-            data["wild"] = None
             clear_wild_state(data)
-            return True  # Batalha terminada por ataques do inimigo
+            return True  # Batalha terminada pelo inimigo
 
-        return True  # Ataque processado
+        return True  # Ataque realizado
 
     # ====================== BOTÕES ======================
 
     @discord.ui.button(label="⚔️ Lutar", style=discord.ButtonStyle.danger, custom_id="fight_mon", row=0)
     async def fight_mon(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.uid:
-            await interaction.response.send_message("❌ Não é a tua batalha!", ephemeral=True)
-            return
+            return await interaction.response.send_message("❌ Não é a tua batalha!", ephemeral=True)
 
-        data = await self._check_battle(interaction)
-        if not data: return
+        data = self._get_data()
+        if not data.get("inBattle") or not data.get("wild"):
+            return await interaction.response.edit_message(content="❌ Batalha terminada.", embed=None, view=None)
 
+        # Verifica cooldown
         cd = max(0, int(math.ceil(data.get("attackCooldownUntil", 0) - time.time())))
         if cd > 0:
-            await interaction.response.send_message(f"⏳ Aguarda **{cd}s**!", ephemeral=True)
-            return
+            return await interaction.response.send_message(f"⏳ Aguarda **{cd}s** para atacar novamente!", ephemeral=True)
 
-        # Processa possível ataque do inimigo antes de atacar
+        # Processa possível ataque do inimigo antes
         self._process_enemy_attack(data)
 
-        # ... (resto do código de luta permanece igual - só adicionei o process_enemy_attack no início)
+        wild = data["wild"]
+        mon = get_active_mon(data)
 
-        # [Mantém todo o teu código atual de cálculo de dano, type effect, etc.]
-        # Apenas certifica-te de que no final fazes:
-        data["attackCooldownUntil"] = time.time() + 5.0
-        write_save(self.uid, data)
+        lines = []
+        if not mon or not mon.get("alive", True):
+            # Ataque manual sem monstro
+            dmg = max(1, int(8 + random.random() * 6))
+            wild["hp"] = max(0, wild["hp"] - dmg)
+            lines.append(f"👊 Atacaste com as mãos! **-{dmg}** HP")
+        else:
+            # Ataque normal com monstro
+            refresh_mon_stats(mon)
+            at, _ = get_type_effect(mon.get("t", ""), wild.get("t", ""))
+            db = 1 + data.get("rebirthCount", 0) * 0.5
+            xb = 1.6 if data.get("xatkActive") else 1.0
+            if data.get("xatkActive"):
+                data["xatkActive"] = False
 
+            dmg = max(1, int(mon["atkStat"] * (0.75 + random.random() * 0.45) * db * at * xb))
+            ret = max(1, int(wild.get("atk", 5) * random.uniform(0.5, 0.95)))
+
+            wild["hp"] = max(0, wild["hp"] - dmg)
+            mon["hp"] = max(0, mon["hp"] - ret)
+
+            # Mensagens de dano
+            if at > 1:
+                lines.append(f"⚡ **Super eficaz!** Causaste **{dmg}** dano!")
+            else:
+                lines.append(f"⚔️ Causaste **{dmg}** dano!")
+            lines.append(f"🗡️ Inimigo contra-atacou! **-{ret}** HP no teu monstro")
+
+            gainXp(mon, 8 + int(wild.get("atk", 5) * 1.6), data)
+
+        data["attackCooldownUntil"] = time.time() + 5.0   # ← COOLDOWN APLICADO AQUI
+
+        # Verifica fim de batalha
+        if wild.get("hp", 0) <= 0:
+            wild["hp"] = 0
+            lines.append(f"✅ **{wild['n']}** derrotado! Usa 🔮 Ball para capturar.")
+            data["battleBonus"] = min(0.65, data.get("battleBonus", 0) + 0.15)
+        elif mon and mon.get("hp", 0) <= 0:
+            mon["alive"] = False
+            lines.append(f"💀 **{mon.get('species')}** desmaiou!")
+            clear_wild_state(data)
+
+        self._save(data)
         self._update_buttons(data)
-        await interaction.response.edit_message(
-            embed=make_wild_embed(data["wild"], data, "\n".join(lines)),
-            view=self
-        )
+
+        embed = make_wild_embed(wild, data, "\n".join(lines))
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    # (O botão Monster Fight pode ficar igual ou simplificado — recomendo usar o mesmo lógica acima)
 
     @discord.ui.button(label="🐾 Monster Fight", style=discord.ButtonStyle.success, custom_id="monster_fight", row=0)
     async def monster_fight(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.uid:
-            await interaction.response.send_message("❌ Não é a tua batalha!", ephemeral=True)
-            return
+        # Pode chamar o mesmo fight_mon internamente ou duplicar a lógica
+        # Por simplicidade, redireciona para o mesmo comportamento:
+        await self.fight_mon(interaction, button)   # reutiliza a lógica
 
-        data = await self._check_battle(interaction)
-        if not data: return
-
-        # Mesmo cooldown do Lutar normal
-        cd = max(0, int(math.ceil(data.get("attackCooldownUntil", 0) - time.time())))
-        if cd > 0:
-            await interaction.response.send_message(f"⏳ Aguarda **{cd}s**!", ephemeral=True)
-            return
-
-        # Processa ataque do inimigo
-        self._process_enemy_attack(data)
-
-        # ... (código atual do monster_fight)
-
-        data["attackCooldownUntil"] = time.time() + 5.0   # ← Adiciona isto aqui também!
-        write_save(self.uid, data)
-
-        self._update_buttons(data)
-        await interaction.response.edit_message(
-            embed=make_wild_embed(data["wild"], data, "\n".join(lines)),
-            view=self
-        )
-
-    # Nos outros botões (Ball, Master, Fugir) podes chamar self._update_buttons(data) quando necessário
+    # ... (mantenha os botões de Ball, Master Ball e Fugir como estavam)
 
     async def on_timeout(self):
         try:
             data = self._get_data()
             if data.get("inBattle"):
                 clear_wild_state(data)
-                write_save(self.uid, data)
+                self._save(data)
         except:
             pass
 
