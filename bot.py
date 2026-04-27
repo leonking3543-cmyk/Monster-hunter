@@ -885,154 +885,160 @@ class BattleView(discord.ui.View):
 # VIEW DE BOSS
 # ══════════════════════════════════════════════
 
-class BossView(discord.ui.View):
-    def __init__(self,uid,timeout=600):
-        super().__init__(timeout=timeout); self.uid=uid
-    async def _chk(self,interaction):
-        data=load_clean_save(self.uid)
-        if not data.get("inBossBattle") or not data.get("boss"):
-            try: await interaction.response.edit_message(content="❌ Sem batalha de boss.",embed=None,view=None)
-            except: pass
-            return None
-        return data
-    async def _defeat(self,interaction,data,lines):
-        clear_boss_state(data); pen=int(data.get("gold",0)*0.1)
-        data["gold"]=max(0,data.get("gold",0)-pen); lines.append(f"\n💀 **Derrotado!** Perdeste 💰**{pen:,}**")
-        write_save(self.uid,data)
-        await interaction.response.edit_message(embed=discord.Embed(title="💀 Derrota contra o Boss",description="\n".join(lines),color=0xe03030),view=None)
-    async def _boss_dead(self,interaction,data,boss,mon,lines):
-        if boss.get("special")=="final_boss" and data.get("finalBossPhase")==1:
-            lines.append("\n💥 **Primeira forma caiu! A forma divina emerge!**")
-            start_final_boss_phase2(data); write_save(self.uid,data)
-            await interaction.response.edit_message(embed=make_boss_embed(data,"\n".join(lines)+"\n\n🐐 **LEONKING surge!**"),view=BossView(self.uid)); return True
-        bn=boss["n"]
-        if bn not in data["bossDefeated"]: data["bossDefeated"].append(bn)
-        rw=boss.get("reward",500); data["gold"]=data.get("gold",0)+int(rw*0.6)
-        for mat in boss.get("mats",[]): data.setdefault("materials",{})[mat["n"]]=data["materials"].get(mat["n"],0)+1
-        if mon: gainXp(mon,60,data)
-        mn=f"{mon.get('e','')} {mon.get('species',mon.get('n','?'))}" if mon else "o teu monstro"
-        clear_boss_state(data); write_save(self.uid,data)
-        ex="\n\n# 🌟 COMPLETASTE O JOGO! 🌟" if boss.get("special")=="final_boss" else ""
-        embed=discord.Embed(title=f"🏆 {boss['e']} {boss['n']} DERROTADO!",
-            description=f"# 🎉 Vitória!\n*{boss.get('title','?')}*{ex}\n\n💰 +**{rw:,}** ouro\n🪨 {', '.join(m['n'] for m in boss.get('mats',[]))}\n⭐ +60 XP para {mn}",color=0xffd700)
-        await interaction.response.edit_message(embed=embed,view=None); return True
+class BattleView(discord.ui.View):
+    def __init__(self, uid, timeout=180):
+        super().__init__(timeout=timeout)
+        self.uid = uid
 
-    @discord.ui.button(label="⚔️ Atacar",style=discord.ButtonStyle.danger,row=0)
-    async def atk(self,interaction:discord.Interaction,button:discord.ui.Button):
-        if interaction.user.id!=self.uid: await interaction.response.send_message("❌",ephemeral=True); return
-        data=await self._chk(interaction)
-        if not data: return
-        mon=data.get("playerMon") or get_active_mon(data)
-        if not mon: await interaction.response.send_message("❌ Sem monstro!",ephemeral=True); return
-        refresh_mon_stats(mon); boss=data["boss"]
-        mt,effect = get_type_effect(mon.get("t",""),boss.get("t","")); xb=1.6 if data.get("xatkActive") else 1.0
-        if data.get("xatkActive"): data["xatkActive"]=False
-        dmg=max(1,int(mon["atkStat"]*mt*(0.85+random.random()*0.4)*xb))
-        
-        # Confirmar ataque se boss < 20% (sincronizado com HTML)
-        future_hp = data["bossHp"] - dmg
-        limit_20 = data["bossMaxHp"] * 0.2
-        if not data.get("confirmAtk20") and future_hp <= limit_20 and future_hp > 0:
-            data["confirmAtk20"] = True
-            write_save(self.uid, data)
-            await interaction.response.send_message(
-                f"⚠️ O Boss está com **20% ou menos de HP**!\nQueres continuar o ataque e arriscar matá-lo?\n\n✅ Confirma com **Atacar** novamente para golpear!\n⏸️ Usa **Defender** ou **Curar** se quiseres tentar capturar.",
-                ephemeral=True
-            )
+    def _get_data(self):
+        return load_clean_save(self.uid)
+
+    def _save(self, data):
+        write_save(self.uid, data)
+
+    def _update_buttons(self, data):
+        """Atualiza o botão de Lutar com o cooldown atual"""
+        cd = max(0, int(math.ceil(data.get("attackCooldownUntil", 0) - time.time())))
+        mon = get_active_mon(data)
+        can_monster = bool(mon and mon.get("alive", True))
+
+        for child in self.children:
+            cid = getattr(child, "custom_id", "")
+            if cid == "fight_mon":
+                child.label = f"⚔️ Lutar ({cd}s)" if cd > 0 else "⚔️ Lutar"
+                child.disabled = (cd > 0)
+            elif cid == "monster_fight":
+                child.disabled = not can_monster
+            elif cid == "throw_ball":
+                child.label = f"🔮 Ball ({data.get('balls', 0)})"
+                child.disabled = (data.get("balls", 0) <= 0)
+            elif cid == "throw_master":
+                child.label = f"⭐ Master ({data.get('masterball', 0)})"
+                child.disabled = (data.get('masterball', 0) <= 0)
+
+    def _process_enemy_attack(self, data):
+        """Ataque automático do inimigo a cada 10 segundos"""
+        wild = data.get("wild")
+        if not wild:
+            return False
+
+        now = time.time()
+        if now - data.get("lastEnemyAtk", 0) < 10:
+            return False
+
+        mon = get_active_mon(data)
+        if not mon or not mon.get("alive", True):
+            return False
+
+        dmg = max(1, int(wild.get("atk", 5) * random.uniform(0.55, 0.95)))
+        mon["hp"] = max(0, mon["hp"] - dmg)
+
+        data["enemyHits"] = data.get("enemyHits", 0) + 1
+        data["lastEnemyAtk"] = now
+
+        max_hits = 3 if is_nightmare_mode(data) else 5
+        if data["enemyHits"] >= max_hits:
+            clear_wild_state(data)
+            return True
+
+        return True
+
+    @discord.ui.button(label="⚔️ Lutar", style=discord.ButtonStyle.danger, custom_id="fight_mon", row=0)
+    async def fight_mon(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.uid:
+            await interaction.response.send_message("❌ Não é a tua batalha!", ephemeral=True)
             return
-        
-        data["confirmAtk20"] = False
-        data["bossHp"]=max(0,data["bossHp"]-dmg)
-        mn=f"{mon.get('e','')} {mon.get('species',mon.get('n','?'))}"
-        lines=[]
-        hint = get_type_hint_text(effect)
-        if mt>1: lines.append(f"⚡ **Super eficaz!** {mn} causou **{dmg:,}**!")
-        elif mt<1: lines.append(f"💧 *Pouco eficaz...* {mn} causou **{dmg:,}**.")
-        else: lines.append(f"⚔️ {mn} atacou! **{dmg:,}** dano!")
-        is_final=boss.get("special")=="final_boss"
-        hr=data["bossHp"]/max(1,data["bossMaxHp"])
-        if hr<=0.20 and hr>0 and not data.get("lowHpWarned") and not (is_final and data.get("finalBossPhase")==1):
-            data["lowHpWarned"]=True; lines.append("⚠️ **Boss abaixo de 20%! Tenta capturá-lo!**")
-        if data["bossHp"]<=0:
-            if await self._boss_dead(interaction,data,boss,mon,lines): return
-        boss_counterattack(data,lines)
-        if data["playerHp"]<=0: await self._defeat(interaction,data,lines); return
-        write_save(self.uid,data); await interaction.response.edit_message(embed=make_boss_embed(data,"\n".join(lines)),view=self)
 
-    @discord.ui.button(label="🛡️ Defender",style=discord.ButtonStyle.secondary,row=0)
-    async def defend(self,interaction:discord.Interaction,button:discord.ui.Button):
-        if interaction.user.id!=self.uid: await interaction.response.send_message("❌",ephemeral=True); return
-        data=await self._chk(interaction)
-        if not data: return
-        data["confirmAtk20"] = False  # Resetar confirmação ao defender
-        data["defending"]=True; lines=["🛡️ A defender! Dano reduzido a **40%**."]
-        boss_counterattack(data,lines)
-        if data["playerHp"]<=0: await self._defeat(interaction,data,lines); return
-        write_save(self.uid,data); await interaction.response.edit_message(embed=make_boss_embed(data,"\n".join(lines)),view=self)
+        data = self._get_data()
+        if not data.get("inBattle") or not data.get("wild"):
+            await interaction.response.edit_message(content="❌ Batalha terminada.", embed=None, view=None)
+            return
 
-    @discord.ui.button(label="🔮 Tentar Capturar",style=discord.ButtonStyle.primary,row=0)
-    async def catch(self,interaction:discord.Interaction,button:discord.ui.Button):
-        if interaction.user.id!=self.uid: await interaction.response.send_message("❌",ephemeral=True); return
-        data=await self._chk(interaction)
-        if not data: return
-        data["confirmAtk20"] = False  # Resetar confirmação ao capturar
-        boss=data["boss"]
-        if boss.get("special")=="final_boss" and data.get("finalBossPhase")==1:
-            await interaction.response.send_message("🌌 A primeira forma não pode ser capturada!",ephemeral=True); return
-        if data.get("bossBallCD",0)>0:
-            await interaction.response.send_message(f"⏳ Ball em recarga! **{data['bossBallCD']}** turno(s).",ephemeral=True); return
-        if boss.get("special")=="master_only":
-            if data.get("masterball",0)<=0: await interaction.response.send_message("👑 **Void King** só capturável com Master Ball!",ephemeral=True); return
-            data["masterball"]-=1
-        elif data.get("balls",0)<=0: await interaction.response.send_message("❌ Sem Balls!",ephemeral=True); return
-        else: data["balls"]-=1; data["bossBallCD"]=3
-        hr=data["bossHp"]/max(1,data["bossMaxHp"])
-        cc=1.0 if boss.get("special")=="master_only" else min(0.95,0.15+(0.10 if hr<=0.5 else 0)+(0.15 if hr<=0.2 else 0)+(0.05 if data.get("defending") else 0))
-        if random.random()<cc:
-            bmh=data["bossMaxHp"]; bn=boss["n"]
-            if bn not in data["bossDefeated"]: data["bossDefeated"].append(bn)
-            bmon={"id":data["nextMonId"],"species":bn,"n":bn,"e":boss["e"],"t":"boss","level":50,"tier":5,
-                  "hp":bmh,"maxHp":bmh,"atkStat":boss["atk"],"hpBoost":0,"atkBoost":0,"alive":True,"isBoss":True,"baseHp":bmh,"baseAtk":boss["atk"],"xp":0}
-            data["nextMonId"]+=1
-            if len(data.get("team",[]))<6: data["team"].append(bmon)
-            else: data["box"].append(bmon)
-            data["gold"]=data.get("gold",0)+boss.get("reward",500)
-            for mat in boss.get("mats",[]): data.setdefault("materials",{})[mat["n"]]=data["materials"].get(mat["n"],0)+2
-            clear_boss_state(data); write_save(self.uid,data)
-            ex="\n\n# 🌟 CAPTURASTE O DEUS ABSOLUTO LEONKING! 🌟" if boss.get("special")=="final_boss" else ""
-            embed=discord.Embed(title=f"✨ {boss['e']} {bn} CAPTURADO!",
-                description=f"# 🎊 Incrível!{ex}\n\n⭐ Tier **5** {tier_stars(5)}\n❤️ **{bmh:,}** HP · ⚔️ **{boss['atk']:,}** ATK\n💰 +**{boss.get('reward',500):,}** ouro",
-                color=0xffd700)
-            await interaction.response.edit_message(embed=embed,view=None); return
-        lines=[f"🌀 Ball falhou! (**{int(cc*100)}%**) · 🔮 {data.get('balls',0)}"]
-        boss_counterattack(data,lines)
-        if data["playerHp"]<=0: await self._defeat(interaction,data,lines); return
-        write_save(self.uid,data); await interaction.response.edit_message(embed=make_boss_embed(data,"\n".join(lines)),view=self)
+        # === COOLDOWN CHECK ===
+        cd = max(0, int(math.ceil(data.get("attackCooldownUntil", 0) - time.time())))
+        if cd > 0:
+            await interaction.response.send_message(f"⏳ Aguarda **{cd}s** para atacar novamente!", ephemeral=True)
+            return
 
-    @discord.ui.button(label="💊 Curar (Poções)",style=discord.ButtonStyle.success,row=1)
-    async def heal(self,interaction:discord.Interaction,button:discord.ui.Button):
-        if interaction.user.id!=self.uid: await interaction.response.send_message("❌",ephemeral=True); return
-        data=await self._chk(interaction)
-        if not data: return
-        data["confirmAtk20"] = False
-        items=data.get("items",{}); mhp=data.get("playerMaxHp",100); h=0; u=""; em=""
-        if items.get("hyperpotion",0)>0: h=mhp; u="hyperpotion"; em="✨"
-        elif items.get("megapotion",0)>0: h=int(mhp*0.5); u="megapotion"; em="💊"
-        elif items.get("superpotion",0)>0: h=150; u="superpotion"; em="💚"
-        elif items.get("potion",0)>0: h=60; u="potion"; em="🧪"
-        else: await interaction.response.send_message("❌ Sem poções!",ephemeral=True); return
-        old=data.get("playerHp",0); data["playerHp"]=min(mhp,old+h); act=data["playerHp"]-old
-        items[u]-=1; data["items"]=items
-        lines=[f"{em} +{act:,} HP → {data['playerHp']:,}/{mhp:,}"]
-        boss_counterattack(data,lines)
-        if data["playerHp"]<=0: await self._defeat(interaction,data,lines); return
-        write_save(self.uid,data); await interaction.response.edit_message(embed=make_boss_embed(data,"\n".join(lines)),view=self)
+        # === ATAQUE DO INIMIGO ANTES ===
+        self._process_enemy_attack(data)
 
-    @discord.ui.button(label="🏃 Retirar",style=discord.ButtonStyle.danger,row=1)
-    async def retreat(self,interaction:discord.Interaction,button:discord.ui.Button):
-        if interaction.user.id!=self.uid: await interaction.response.send_message("❌",ephemeral=True); return
-        data=load_clean_save(self.uid); clear_boss_state(data); write_save(self.uid,data)
-        await interaction.response.edit_message(content="🏃 Recuaste da batalha!",embed=None,view=None)
+        wild = data["wild"]
+        mon = get_active_mon(data)
+        lines = []
+
+        if not mon or not mon.get("alive", True):
+            dmg = max(1, int(8 + random.random() * 6))
+            wild["hp"] = max(0, wild.get("hp", 0) - dmg)
+            lines.append(f"👊 Atacaste com as mãos! **-{dmg}** HP")
+        else:
+            refresh_mon_stats(mon)
+            at, _ = get_type_effect(mon.get("t", ""), wild.get("t", ""))
+            db = 1 + data.get("rebirthCount", 0) * 0.5
+            xb = 1.6 if data.get("xatkActive", False) else 1.0
+            if data.get("xatkActive", False):
+                data["xatkActive"] = False
+
+            dmg = max(1, int(mon["atkStat"] * (0.75 + random.random() * 0.45) * db * at * xb))
+            ret = max(1, int(wild.get("atk", 5) * random.uniform(0.5, 0.95)))
+
+            wild["hp"] = max(0, wild.get("hp", 0) - dmg)
+            mon["hp"] = max(0, mon["hp"] - ret)
+
+            lines.append(f"⚔️ {mon.get('e','')} causou **{dmg}** dano!")
+            lines.append(f"🗡️ Inimigo contra-atacou! **-{ret}** HP")
+
+            gainXp(mon, 8 + int(wild.get("atk", 5) * 1.6), data)
+
+        # === APLICA COOLDOWN ===
+        data["attackCooldownUntil"] = time.time() + 5.0
+
+        # Verifica fim da batalha
+        if wild.get("hp", 0) <= 0:
+            wild["hp"] = 0
+            lines.append(f"✅ **{wild['n']}** derrotado! Usa 🔮 Ball para capturar.")
+            data["battleBonus"] = min(0.65, data.get("battleBonus", 0) + 0.15)
+        elif mon and mon.get("hp", 0) <= 0:
+            mon["alive"] = False
+            lines.append(f"💀 **{mon.get('species', mon.get('n','?'))}** desmaiou!")
+
+        self._save(data)
+        self._update_buttons(data)
+
+        await interaction.response.edit_message(
+            embed=make_wild_embed(wild, data, "\n".join(lines)),
+            view=self
+        )
+
+    @discord.ui.button(label="🐾 Monster Fight", style=discord.ButtonStyle.success, custom_id="monster_fight", row=0)
+    async def monster_fight(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.fight_mon(interaction, button)  # Reutiliza a mesma lógica
+
+    @discord.ui.button(label="🔮 Ball", style=discord.ButtonStyle.primary, custom_id="throw_ball", row=0)
+    async def throw_ball(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # (mantém o teu código original deste botão)
+        if interaction.user.id != self.uid:
+            await interaction.response.send_message("❌ Não é a tua batalha!", ephemeral=True)
+            return
+        data = self._get_data()
+        if not data.get("inBattle") or not data.get("wild"):
+            await interaction.response.edit_message(content="❌ Sem batalha.", embed=None, view=None)
+            return
+        # ... resto do código original do throw_ball ...
+        # No final, depois de write_save:
+        self._update_buttons(data)
+        # (mantém o resto como estava)
+
+    # Mantém os outros botões (throw_master, flee) como estavam originalmente
+
+    async def on_timeout(self):
+        try:
+            data = self._get_data()
+            if data.get("inBattle"):
+                clear_wild_state(data)
+                self._save(data)
+        except:
+            pass
 
 # ══════════════════════════════════════════════
 # VIEW DA LOJA
