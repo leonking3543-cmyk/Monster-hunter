@@ -733,12 +733,86 @@ class BattleView(discord.ui.View):
     def __init__(self, uid, timeout=180):
         super().__init__(timeout=timeout)
         self.uid = uid
+        self.message = None          # guardado após envio para editar automaticamente
+        self._cd_task = None         # task do cooldown de ataque
+        self._enemy_task = None      # task do ataque automático do inimigo
 
     def _get_data(self):
         return load_clean_save(self.uid)
 
     def _save(self, data):
         write_save(self.uid, data)
+
+    def _cancel_tasks(self):
+        if self._cd_task and not self._cd_task.done():
+            self._cd_task.cancel()
+        if self._enemy_task and not self._enemy_task.done():
+            self._enemy_task.cancel()
+
+    async def _cooldown_refresh(self, seconds: float):
+        """Após o cooldown expirar, edita a mensagem para reativar o botão."""
+        try:
+            await asyncio.sleep(seconds)
+            if not self.message:
+                return
+            data = self._get_data()
+            if not data.get("inBattle") or not data.get("wild"):
+                return
+            self._update_buttons(data)
+            await self.message.edit(
+                embed=make_wild_embed(data["wild"], data, "⚔️ Ataque disponível!"),
+                view=self
+            )
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            print(f"[cooldown_refresh] erro: {e}")
+
+    async def _enemy_auto_attack(self, delay: float):
+        """Após o delay, o inimigo ataca automaticamente."""
+        try:
+            await asyncio.sleep(delay)
+            if not self.message:
+                return
+            data = self._get_data()
+            if not data.get("inBattle") or not data.get("wild"):
+                return
+
+            wild = data["wild"]
+            mon = get_active_mon(data)
+            lines = []
+
+            # Ataque automático do inimigo
+            if mon and mon.get("alive", True):
+                refresh_mon_stats(mon)
+                ret = max(1, int(wild.get("atk", 5) * random.uniform(0.6, 1.1)))
+                mon["hp"] = max(0, mon["hp"] - ret)
+                lines.append(f"⏰ **{wild['n']}** atacou automaticamente! **-{ret}** HP")
+
+                if mon["hp"] <= 0:
+                    mon["alive"] = False
+                    lines.append("💀 Teu monstro desmaiou!")
+                    clear_wild_state(data)
+                    self._save(data)
+                    self._update_buttons(data)
+                    await self.message.edit(
+                        embed=discord.Embed(title="💀 Monstro Desmaiou!", description="\n".join(lines), color=0xff0000),
+                        view=None
+                    )
+                    return
+
+            self._save(data)
+            self._update_buttons(data)
+            await self.message.edit(
+                embed=make_wild_embed(wild, data, "\n".join(lines)),
+                view=self
+            )
+            # Agenda próximo ataque automático
+            self._enemy_task = asyncio.create_task(self._enemy_auto_attack(10))
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            print(f"[enemy_auto_attack] erro: {e}")
 
     def _update_buttons(self, data):
         mon = get_active_mon(data)
@@ -849,6 +923,23 @@ class BattleView(discord.ui.View):
             view=self
         )
 
+        # Guarda referência à mensagem para as tasks automáticas
+        if not self.message:
+            self.message = await interaction.original_response()
+
+        # Cancela tasks antigas e lança a task do cooldown (reativa botão após 5s)
+        if self._cd_task and not self._cd_task.done():
+            self._cd_task.cancel()
+        remaining_cd = max(0, data.get("attackCooldownUntil", 0) - time.time())
+        if remaining_cd > 0:
+            self._cd_task = asyncio.create_task(self._cooldown_refresh(remaining_cd))
+
+        # Lança (ou reinicia) a task de ataque automático do inimigo a cada 10s
+        if self._enemy_task and not self._enemy_task.done():
+            self._enemy_task.cancel()
+        if data.get("inBattle") and data.get("wild") and data["wild"].get("hp", 0) > 0:
+            self._enemy_task = asyncio.create_task(self._enemy_auto_attack(10))
+
     # ====================== MONSTER FIGHT (mantido igual) ======================
     @discord.ui.button(label="🐾 Monster Fight", style=discord.ButtonStyle.success, custom_id="monster_fight", row=0)
     async def monster_fight(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -936,13 +1027,15 @@ class BattleView(discord.ui.View):
             await interaction.response.send_message("❌ Não é a tua batalha!", ephemeral=True)
             return
 
+        self._cancel_tasks()
         data = self._get_data()
-        data["attackCooldownUntil"] = 0   # limpa o cooldown
+        data["attackCooldownUntil"] = 0
         clear_wild_state(data)
         self._save(data)
         await interaction.response.edit_message(content="🏃 Fugiste da batalha!", embed=None, view=None)
 
     async def on_timeout(self):
+        self._cancel_tasks()
         try:
             data = self._get_data()
             if data.get("inBattle"):
@@ -1064,7 +1157,9 @@ async def hunt(interaction:discord.Interaction):
     data["wild"]=wild; data["inBattle"]=True; data["battleBonus"]=0
     data["attackCooldownUntil"]=0; data["battles"]=data.get("battles",0)+1
     write_save(uid,data)
-    await interaction.response.send_message(embed=make_wild_embed(wild,data,f"Um **{wild['n']}** selvagem apareceu!"),view=BattleView(uid))
+    view=BattleView(uid)
+    await interaction.response.send_message(embed=make_wild_embed(wild,data,f"Um **{wild['n']}** selvagem apareceu!"),view=view)
+    view.message=await interaction.original_response()
 
 @tree.command(name="equipa",description="Vê a tua equipa")
 async def team_cmd(interaction:discord.Interaction):
