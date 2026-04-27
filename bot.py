@@ -726,7 +726,7 @@ bot=commands.Bot(command_prefix="!",intents=intents)
 tree=bot.tree
 
 # ══════════════════════════════════════════════
-# VIEW BATALHA SELVAGEM
+# VIEW BATALHA SELVAGEM - VERSÃO FINAL FUNCIONAL
 # ══════════════════════════════════════════════
 
 class BattleView(discord.ui.View):
@@ -735,15 +735,12 @@ class BattleView(discord.ui.View):
         self.uid = uid
 
     def _get_data(self):
-        """Carrega dados limpos"""
         return load_clean_save(self.uid)
 
     def _save(self, data):
-        """Guarda os dados"""
         write_save(self.uid, data)
 
     def _update_buttons(self, data):
-        """Atualiza estado dos botões (cooldown)"""
         cd = max(0, int(math.ceil(data.get("attackCooldownUntil", 0) - time.time())))
         mon = get_active_mon(data)
         can_fight = bool(mon and mon.get("alive", True))
@@ -752,7 +749,7 @@ class BattleView(discord.ui.View):
             cid = getattr(child, "custom_id", "")
             if cid == "fight_mon":
                 child.label = f"⚔️ Lutar ({cd}s)" if cd > 0 else "⚔️ Lutar"
-                child.disabled = (cd > 0)
+                child.disabled = cd > 0
             elif cid == "monster_fight":
                 child.disabled = not can_fight
             elif cid == "throw_ball":
@@ -763,166 +760,16 @@ class BattleView(discord.ui.View):
                 child.disabled = data.get("masterball", 0) <= 0
 
     def _process_enemy_attack(self, data):
-        """Processa ataque automático do inimigo selvagem a cada 10s"""
-        if not data.get("wild"):
+        if not data.get("wild"): 
+            return False
+        now = time.time()
+        if now - data.get("lastEnemyAtk", 0) < 10:
             return False
 
-        now = time.time()
-        last_atk = data.get("lastEnemyAtk", 0)
-
-        if now - last_atk < 10:
-            return False  # Ainda não é hora
-
         mon = get_active_mon(data)
-        wild = data["wild"]
-        if not mon or not mon.get("alive", True):
+        wild = data.get("wild")
+        if not mon or not mon.get("alive", True) or not wild:
             return False
-
-        # Inimigo ataca
-        dmg = max(1, int(wild.get("atk", 5) * random.uniform(0.5, 0.95)))
-        mon["hp"] = max(0, mon["hp"] - dmg)
-
-        data["enemyHits"] = data.get("enemyHits", 0) + 1
-        data["lastEnemyAtk"] = now
-
-        max_hits = 3 if is_nightmare_mode(data) else 5
-        if data["enemyHits"] >= max_hits:
-            clear_wild_state(data)
-            return True  # Batalha terminada pelo inimigo
-
-        return True  # Ataque realizado
-
-    # ====================== BOTÕES ======================
-
-    @discord.ui.button(label="⚔️ Lutar", style=discord.ButtonStyle.danger, custom_id="fight_mon", row=0)
-    async def fight_mon(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.uid:
-            return await interaction.response.send_message("❌ Não é a tua batalha!", ephemeral=True)
-
-        data = self._get_data()
-        if not data.get("inBattle") or not data.get("wild"):
-            return await interaction.response.edit_message(content="❌ Batalha terminada.", embed=None, view=None)
-
-        # Verifica cooldown
-        cd = max(0, int(math.ceil(data.get("attackCooldownUntil", 0) - time.time())))
-        if cd > 0:
-            return await interaction.response.send_message(f"⏳ Aguarda **{cd}s** para atacar novamente!", ephemeral=True)
-
-        # Processa possível ataque do inimigo antes
-        self._process_enemy_attack(data)
-
-        wild = data["wild"]
-        mon = get_active_mon(data)
-
-        lines = []
-        if not mon or not mon.get("alive", True):
-            # Ataque manual sem monstro
-            dmg = max(1, int(8 + random.random() * 6))
-            wild["hp"] = max(0, wild["hp"] - dmg)
-            lines.append(f"👊 Atacaste com as mãos! **-{dmg}** HP")
-        else:
-            # Ataque normal com monstro
-            refresh_mon_stats(mon)
-            at, _ = get_type_effect(mon.get("t", ""), wild.get("t", ""))
-            db = 1 + data.get("rebirthCount", 0) * 0.5
-            xb = 1.6 if data.get("xatkActive") else 1.0
-            if data.get("xatkActive"):
-                data["xatkActive"] = False
-
-            dmg = max(1, int(mon["atkStat"] * (0.75 + random.random() * 0.45) * db * at * xb))
-            ret = max(1, int(wild.get("atk", 5) * random.uniform(0.5, 0.95)))
-
-            wild["hp"] = max(0, wild["hp"] - dmg)
-            mon["hp"] = max(0, mon["hp"] - ret)
-
-            # Mensagens de dano
-            if at > 1:
-                lines.append(f"⚡ **Super eficaz!** Causaste **{dmg}** dano!")
-            else:
-                lines.append(f"⚔️ Causaste **{dmg}** dano!")
-            lines.append(f"🗡️ Inimigo contra-atacou! **-{ret}** HP no teu monstro")
-
-            gainXp(mon, 8 + int(wild.get("atk", 5) * 1.6), data)
-
-        data["attackCooldownUntil"] = time.time() + 5.0   # ← COOLDOWN APLICADO AQUI
-
-        # Verifica fim de batalha
-        if wild.get("hp", 0) <= 0:
-            wild["hp"] = 0
-            lines.append(f"✅ **{wild['n']}** derrotado! Usa 🔮 Ball para capturar.")
-            data["battleBonus"] = min(0.65, data.get("battleBonus", 0) + 0.15)
-        elif mon and mon.get("hp", 0) <= 0:
-            mon["alive"] = False
-            lines.append(f"💀 **{mon.get('species')}** desmaiou!")
-            clear_wild_state(data)
-
-        self._save(data)
-        self._update_buttons(data)
-
-        embed = make_wild_embed(wild, data, "\n".join(lines))
-        await interaction.response.edit_message(embed=embed, view=self)
-
-    # (O botão Monster Fight pode ficar igual ou simplificado — recomendo usar o mesmo lógica acima)
-
-    @discord.ui.button(label="🐾 Monster Fight", style=discord.ButtonStyle.success, custom_id="monster_fight", row=0)
-    async def monster_fight(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Pode chamar o mesmo fight_mon internamente ou duplicar a lógica
-        # Por simplicidade, redireciona para o mesmo comportamento:
-        await self.fight_mon(interaction, button)   # reutiliza a lógica
-
-    # ... (mantenha os botões de Ball, Master Ball e Fugir como estavam)
-
-    async def on_timeout(self):
-        try:
-            data = self._get_data()
-            if data.get("inBattle"):
-                clear_wild_state(data)
-                self._save(data)
-        except:
-            pass
-
-# ══════════════════════════════════════════════
-# VIEW BATALHA SELVAGEM (VERSÃO CORRIGIDA)
-# ══════════════════════════════════════════════
-
-class BattleView(discord.ui.View):
-    def __init__(self, uid, timeout=180):
-        super().__init__(timeout=timeout)
-        self.uid = uid
-
-    def _get_data(self):
-        return load_clean_save(self.uid)
-
-    def _save(self, data):
-        write_save(self.uid, data)
-
-    def _update_buttons(self, data):
-        cd = max(0, int(math.ceil(data.get("attackCooldownUntil", 0) - time.time())))
-        mon = get_active_mon(data)
-        can_fight = bool(mon and mon.get("alive", True))
-
-        for child in self.children:
-            cid = getattr(child, "custom_id", "")
-            if cid == "fight_mon":
-                child.label = f"⚔️ Lutar ({cd}s)" if cd > 0 else "⚔️ Lutar"
-                child.disabled = (cd > 0)
-            elif cid == "monster_fight":
-                child.disabled = not can_fight
-            elif cid == "throw_ball":
-                child.label = f"🔮 Ball ({data.get('balls', 0)})"
-                child.disabled = (data.get("balls", 0) <= 0)
-            elif cid == "throw_master":
-                child.label = f"⭐ Master ({data.get('masterball', 0)})"
-                child.disabled = (data.get("masterball", 0) <= 0)
-
-    def _process_enemy_attack(self, data):
-        if not data.get("wild"): return False
-        now = time.time()
-        if now - data.get("lastEnemyAtk", 0) < 10: return False
-
-        mon = get_active_mon(data)
-        wild = data["wild"]
-        if not mon or not mon.get("alive", True): return False
 
         dmg = max(1, int(wild.get("atk", 5) * random.uniform(0.55, 0.95)))
         mon["hp"] = max(0, mon["hp"] - dmg)
@@ -943,12 +790,12 @@ class BattleView(discord.ui.View):
 
         data = self._get_data()
         if not data.get("inBattle") or not data.get("wild"):
-            await interaction.response.edit_message(content="❌ Batalha terminada. Usa `/caçar` novamente.", embed=None, view=None)
+            await interaction.response.edit_message(content="❌ Sem batalha ativa. Usa `/caçar`.", embed=None, view=None)
             return
 
         cd = max(0, int(math.ceil(data.get("attackCooldownUntil", 0) - time.time())))
         if cd > 0:
-            await interaction.response.send_message(f"⏳ Aguarda **{cd}s** para atacar novamente!", ephemeral=True)
+            await interaction.response.send_message(f"⏳ Aguarda **{cd}s** para atacar!", ephemeral=True)
             return
 
         self._process_enemy_attack(data)
@@ -991,7 +838,7 @@ class BattleView(discord.ui.View):
             data["battleBonus"] = min(0.65, data.get("battleBonus", 0) + 0.15)
         elif mon and mon.get("hp", 0) <= 0:
             mon["alive"] = False
-            lines.append(f"💀 **{mon.get('species', mon.get('n','?'))}** desmaiou!")
+            lines.append(f"💀 Teu monstro desmaiou!")
             clear_wild_state(data)
 
         self._save(data)
@@ -1006,16 +853,69 @@ class BattleView(discord.ui.View):
     async def monster_fight(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.fight_mon(interaction, button)
 
-    # Botões de Ball, Master e Fugir (mantidos simplificados)
     @discord.ui.button(label="🔮 Ball", style=discord.ButtonStyle.primary, custom_id="throw_ball", row=0)
     async def throw_ball(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # ... (podes manter o teu código original aqui ou usar a versão anterior)
-        # Por agora, para evitar erros, vamos deixar um placeholder simples:
-        await interaction.response.send_message("🔮 Funcionalidade de Ball em manutenção. Usa o código anterior se quiseres.", ephemeral=True)
+        if interaction.user.id != self.uid:
+            await interaction.response.send_message("❌ Não é a tua batalha!", ephemeral=True)
+            return
 
-    @discord.ui.button(label="⭐ Master Ball", style=discord.ButtonStyle.success, custom_id="throw_master", row=0)
+        data = self._get_data()
+        if not data.get("inBattle") or not data.get("wild"):
+            await interaction.response.edit_message(content="❌ Sem batalha ativa.", embed=None, view=None)
+            return
+
+        if data.get("balls", 0) <= 0:
+            await interaction.response.send_message("❌ Sem Balls!", ephemeral=True)
+            return
+
+        wild = data["wild"]
+        data["balls"] -= 1
+        chance = get_catch_chance(wild, data)
+
+        if random.random() < chance:
+            captured = capture_wild(wild, data)
+            if wild["n"] not in data.get("caught", []):
+                data.setdefault("caught", []).append(wild["n"])
+            clear_wild_state(data)
+            data["balls"] = min(99, data.get("balls", 0) + 2)
+            self._save(data)
+
+            embed = discord.Embed(
+                title=f"✅ {wild.get('e','')} {wild['n']} Capturado!",
+                description=f"Sucesso! ({int(chance*100)}%)\n{type_badge(wild.get('t','?'))} · {rare_badge(wild.get('rare','comum'))}",
+                color=RARE_COLOR.get(wild.get("rare","comum"), 0x888888)
+            )
+            await interaction.response.edit_message(embed=embed, view=None)
+        else:
+            self._save(data)
+            await interaction.response.edit_message(
+                embed=make_wild_embed(wild, data, "💥 A bola falhou! Chance: " + str(int(chance*100)) + "%"),
+                view=self
+            )
+
+    @discord.ui.button(label="⭐ Master", style=discord.ButtonStyle.success, custom_id="throw_master", row=0)
     async def throw_master(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("⭐ Funcionalidade de Master Ball em manutenção.", ephemeral=True)
+        if interaction.user.id != self.uid:
+            await interaction.response.send_message("❌ Não é a tua batalha!", ephemeral=True)
+            return
+        data = self._get_data()
+        if not data.get("inBattle") or not data.get("wild"):
+            await interaction.response.edit_message(content="❌ Sem batalha.", embed=None, view=None)
+            return
+        if data.get("masterball", 0) <= 0:
+            await interaction.response.send_message("❌ Sem Master Ball!", ephemeral=True)
+            return
+
+        wild = data["wild"]
+        data["masterball"] -= 1
+        captured = capture_wild(wild, data)
+        if wild["n"] not in data.get("caught", []):
+            data.setdefault("caught", []).append(wild["n"])
+        clear_wild_state(data)
+        self._save(data)
+
+        embed = discord.Embed(title=f"⭐ {wild.get('e','')} {wild['n']} Capturado!", description="Captura garantida!", color=0xffd700)
+        await interaction.response.edit_message(embed=embed, view=None)
 
     @discord.ui.button(label="🏃 Fugir", style=discord.ButtonStyle.secondary, custom_id="flee", row=1)
     async def flee(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1035,7 +935,6 @@ class BattleView(discord.ui.View):
                 self._save(data)
         except:
             pass
-
 # ══════════════════════════════════════════════
 # VIEW DA LOJA
 # ══════════════════════════════════════════════
