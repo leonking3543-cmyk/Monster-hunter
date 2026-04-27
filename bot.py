@@ -729,7 +729,7 @@ tree=bot.tree
 # VIEW BATALHA SELVAGEM - VERSÃO FINAL FUNCIONAL
 # ══════════════════════════════════════════════
 
-cclass BattleView(discord.ui.View):
+class BattleView(discord.ui.View):
     def __init__(self, uid, timeout=180):
         super().__init__(timeout=timeout)
         self.uid = uid
