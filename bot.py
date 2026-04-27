@@ -744,18 +744,19 @@ class BattleView(discord.ui.View):
         mon = get_active_mon(data)
         can_fight = bool(mon and mon.get("alive", True))
         
-        # Nova lógica: ataque fica bloqueado até usar outra ação
-        attack_blocked = data.get("attackBlocked", False)
+        # Cooldown de tempo real de 5 segundos
+        cd = max(0, math.ceil(data.get("attackCooldownUntil", 0) - time.time()))
+        on_cooldown = cd > 0
 
         for child in self.children:
             cid = getattr(child, "custom_id", "")
             
             if cid == "fight_mon":
-                child.label = "⚔️ Lutar (em espera)" if attack_blocked else "⚔️ Lutar"
-                child.disabled = attack_blocked or not can_fight
+                child.label = f"⚔️ Lutar ({cd}s)" if on_cooldown else "⚔️ Lutar"
+                child.disabled = on_cooldown or not can_fight
                 
             elif cid == "monster_fight":
-                child.disabled = not can_fight or attack_blocked
+                child.disabled = not can_fight or on_cooldown
                 
             elif cid == "throw_ball":
                 child.label = f"🔮 Ball ({data.get('balls', 0)})"
@@ -778,12 +779,11 @@ class BattleView(discord.ui.View):
             await interaction.response.edit_message(content="❌ Sem batalha ativa. Usa `/caçar`.", embed=None, view=None)
             return
 
-        if data.get("attackBlocked", False):
-            await interaction.response.send_message("⏳ Usa outra ação primeiro para poderes atacar novamente!", ephemeral=True)
+        # Verifica cooldown de tempo real (5 segundos)
+        cd = max(0, math.ceil(data.get("attackCooldownUntil", 0) - time.time()))
+        if cd > 0:
+            await interaction.response.send_message(f"⏳ Ataque disponível em **{cd}s**!", ephemeral=True)
             return
-
-        # Processa ataque do inimigo (se for wild)
-        self._process_enemy_attack(data)
 
         wild = data["wild"]
         mon = get_active_mon(data)
@@ -815,13 +815,27 @@ class BattleView(discord.ui.View):
 
             gainXp(mon, 8 + int(wild.get("atk", 5) * 1.6), data)
 
-        # BLOQUEIA o ataque até usar outra ação
-        data["attackBlocked"] = True
+        # Incrementa contador de tapas e verifica fuga do inimigo
+        max_hits = 3 if is_nightmare_mode(data) else 5
+        data["enemyHits"] = data.get("enemyHits", 0) + 1
+        if data["enemyHits"] >= max_hits and wild.get("hp", 0) > 0:
+            lines.append(f"🏃 **{wild['n']}** ficou com medo e **fugiu** depois de {max_hits} ataques!")
+            clear_wild_state(data)
+            self._save(data)
+            await interaction.response.edit_message(
+                embed=discord.Embed(title="💨 Inimigo Fugiu!", description="\n".join(lines), color=0x888888),
+                view=None
+            )
+            return
+
+        # Ativa cooldown de 5 segundos
+        data["attackCooldownUntil"] = time.time() + 5
 
         if wild.get("hp", 0) <= 0:
             wild["hp"] = 0
             lines.append(f"✅ **{wild['n']}** derrotado! Usa 🔮 Ball para capturar.")
             data["battleBonus"] = min(0.65, data.get("battleBonus", 0) + 0.15)
+            data["attackCooldownUntil"] = 0  # Sem cooldown quando inimigo está a 0 HP
         elif mon and mon.get("hp", 0) <= 0:
             mon["alive"] = False
             lines.append(f"💀 Teu monstro desmaiou!")
@@ -875,8 +889,8 @@ class BattleView(discord.ui.View):
             )
             await interaction.response.edit_message(embed=embed, view=None)
         else:
-            # Reset do ataque quando a bola falha
-            data["attackBlocked"] = False
+            # Reset cooldown quando a bola falha (nova ação foi tomada)
+            data["attackCooldownUntil"] = 0
             self._save(data)
             self._update_buttons(data)
             await interaction.response.edit_message(
@@ -907,9 +921,6 @@ class BattleView(discord.ui.View):
             data.setdefault("caught", []).append(wild["n"])
         clear_wild_state(data)
 
-        # Reset do ataque
-        data["attackBlocked"] = False
-
         self._save(data)
         embed = discord.Embed(
             title=f"⭐ {wild.get('e','')} {wild['n']} Capturado!", 
@@ -926,7 +937,7 @@ class BattleView(discord.ui.View):
             return
 
         data = self._get_data()
-        data["attackBlocked"] = False   # limpa o bloqueio
+        data["attackCooldownUntil"] = 0   # limpa o cooldown
         clear_wild_state(data)
         self._save(data)
         await interaction.response.edit_message(content="🏃 Fugiste da batalha!", embed=None, view=None)
@@ -935,7 +946,7 @@ class BattleView(discord.ui.View):
         try:
             data = self._get_data()
             if data.get("inBattle"):
-                data["attackBlocked"] = False
+                data["attackCooldownUntil"] = 0
                 clear_wild_state(data)
                 self._save(data)
         except:
