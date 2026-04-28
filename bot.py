@@ -733,8 +733,8 @@ class BattleView(discord.ui.View):
     def __init__(self, uid, timeout=180):
         super().__init__(timeout=timeout)
         self.uid = uid
-        self.message = None          # guardado após envio para editar automaticamente
-        self._cd_task = None         # task do cooldown de ataque
+        self.message = None
+        self._cd_task = None
         self._enemy_task = None      # task do ataque automático do inimigo
 
     def _get_data(self):
@@ -746,8 +746,8 @@ class BattleView(discord.ui.View):
     def _cancel_tasks(self):
         if self._cd_task and not self._cd_task.done():
             self._cd_task.cancel()
-        if not self._enemy_task or self._enemy_task.done():
-    self._enemy_task = asyncio.create_task(self._enemy_auto_attack(10))
+        if self._enemy_task and not self._enemy_task.done():
+            self._enemy_task.cancel()
 
 async def _cooldown_refresh(self, seconds: float):
     """Atualiza o botão em tempo real durante o cooldown."""
@@ -960,11 +960,14 @@ async def _enemy_auto_attack(self, delay: float):
             self._cd_task = asyncio.create_task(self._cooldown_refresh(remaining_cd))
 
         # Lança (ou reinicia) a task de ataque automático do inimigo a cada 10s
-        if not self._enemy_task or self._enemy_task.done():
-    self._enemy_task = asyncio.create_task(self._enemy_auto_attack(10))
+                # Lança (ou reinicia) a task de ataque automático do inimigo a cada 10s
+        # Só cria a tarefa se a batalha ainda estiver ativa e o monstro selvagem tiver vida
         if data.get("inBattle") and data.get("wild") and data["wild"].get("hp", 0) > 0:
+            # Cancela a tarefa anterior se ela existir e já tiver terminado, para evitar conflitos
+            if self._enemy_task and not self._enemy_task.done():
+                self._enemy_task.cancel()
+            
             self._enemy_task = asyncio.create_task(self._enemy_auto_attack(10))
-
     # ====================== MONSTER FIGHT (mantido igual) ======================
     @discord.ui.button(label="🐾 Monster Fight", style=discord.ButtonStyle.success, custom_id="monster_fight", row=0)
     async def monster_fight(self, interaction: discord.Interaction, button: discord.ui.Button):
