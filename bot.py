@@ -749,71 +749,88 @@ class BattleView(discord.ui.View):
         if self._enemy_task and not self._enemy_task.done():
             self._enemy_task.cancel()
 
-async def _cooldown_refresh(self, seconds: float):
-    """Atualiza o botão em tempo real durante o cooldown."""
-    try:
-        while True:
-            if not self.message:
-                return
+    async def _cooldown_refresh(self):
+        """Atualiza o botão em tempo real até o cooldown acabar. Cancela se a batalha acabar."""
+        try:
+            while True:
+                if not self.message:
+                    return
 
-            data = self._get_data()
-            if not data.get("inBattle") or not data.get("wild"):
-                return
+                data = self._get_data()
+                
+                # VERIFICA CRÍTICA: Se a batalha acabou ou o cooldown acabou no meio do loop
+                if not data.get("inBattle") or not data.get("wild"):
+                    return
+                
+                # Se o cooldown já foi zerado por outra ação (ex: vitória), para
+                if data.get("attackCooldownUntil", 0) <= time.time():
+                    data["attackCooldownUntil"] = 0
+                    self._save(data)
+                    self._update_buttons(data)
+                    await self.message.edit(
+                        embed=make_wild_embed(data["wild"], data, "⚔️ Podes atacar novamente!"),
+                        view=self
+                    )
+                    return
 
-            remaining = data.get("attackCooldownUntil", 0) - time.time()
+                # Calcula tempo restante
+                remaining = data.get("attackCooldownUntil", 0) - time.time()
 
-            if remaining <= 0:
-                # cooldown acabou
-                data["attackCooldownUntil"] = 0
-                self._save(data)
+                # Atualiza UI (desabilita botão enquanto houver tempo)
                 self._update_buttons(data)
+                
+                # Atualiza a mensagem no Discord (apenas muda o view, sem editar embed se não for necessário para performance)
+                # Nota: Editar view apenas é mais rápido que recriar o embed
+                await self.message.edit(view=self)
 
-                await self.message.edit(
-                    embed=make_wild_embed(data["wild"], data, "⚔️ Podes atacar novamente!"),
-                    view=self
-                )
-                return
+                # Espera 1 segundo e verifica novamente
+                await asyncio.sleep(1)
 
-            # atualiza UI a cada segundo
-            self._update_buttons(data)
-            await self.message.edit(view=self)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            print(f"[cooldown_refresh] erro: {e}")
 
-            await asyncio.sleep(1)
+    async def _enemy_auto_attack(self):
+        """Loop de ataques do inimigo. Para se o monstro morrer OU se o inimigo fugir (5 ataques)."""
+        try:
+            while True:
+                # Espera 10 segundos entre ataques
+                await asyncio.sleep(10)
 
-    except asyncio.CancelledError:
-        pass
-    except Exception as e:
-        print(f"[cooldown_refresh] erro: {e}")
+                if not self.message:
+                    return
 
-async def _enemy_auto_attack(self, delay: float):
-    """Loop contínuo de ataques do inimigo."""
-    try:
-        while True:
-            await asyncio.sleep(delay)
+                data = self._get_data()
+                
+                # VERIFICA CRÍTICA: Se a batalha acabou ou o inimigo fugiu
+                if not data.get("inBattle") or not data.get("wild"):
+                    return
 
-            if not self.message:
-                return
+                wild = data["wild"]
+                mon = get_active_mon(data)
+                
+                # SE O INIMIGO JÁ MURIU OU FOGEU (HP <= 0 ou não está mais em batalha), PARA
+                if wild.get("hp", 0) <= 0:
+                    return
 
-            data = self._get_data()
-            if not data.get("inBattle") or not data.get("wild"):
-                return
+                # SE O MONSTRO DO JOGADOR DESMAIOU, PARA
+                if not mon or not mon.get("alive", True):
+                    return
 
-            wild = data["wild"]
-            mon = get_active_mon(data)
-            lines = []
-
-            if mon and mon.get("alive", True):
+                # --- LÓGICA DE ATAQUE ---
+                lines = []
                 refresh_mon_stats(mon)
                 ret = max(1, int(wild.get("atk", 5) * random.uniform(0.6, 1.1)))
                 mon["hp"] = max(0, mon["hp"] - ret)
                 lines.append(f"⏰ **{wild['n']}** atacou! **-{ret}** HP!")
 
+                # VERIFICA SE O MONSTRO MORREU
                 if mon["hp"] <= 0:
                     mon["alive"] = False
                     lines.append("💀 Teu monstro desmaiou!")
                     clear_wild_state(data)
                     self._save(data)
-
                     await self.message.edit(
                         embed=discord.Embed(
                             title="💀 Monstro Desmaiou!",
@@ -822,22 +839,32 @@ async def _enemy_auto_attack(self, delay: float):
                         ),
                         view=None
                     )
-                    return
-            else:
-                lines.append("⏰ Inimigo tentou atacar mas não tens monstro!")
+                    return # Pára a task
 
-            self._save(data)
-            self._update_buttons(data)
+                # --- VERIFICA SE O INIMIGO FUGIU (Após 5 ataques) ---
+                # O contador 'enemyHits' é incrementado NO BOTÃO LUTAR, não aqui.
+                # Se ele atingiu o limite, o inimigo já fugiu e a batalha acabou.
+                # Mas vamos checar se a batalha ainda está ativa antes de continuar.
+                if data.get("enemyHits", 0) >= (3 if is_nightmare_mode(data) else 5):
+                    # Se o contador atingiu o limite, o inimigo já fugiu na hora do ataque.
+                    # Se ainda estiver aqui, é porque a batalha foi encerrada ou o inimigo fugiu.
+                    # Verifica se o estado 'wild' ainda existe. Se não, para.
+                    if not data.get("wild"):
+                        return
 
-            await self.message.edit(
-                embed=make_wild_embed(wild, data, "\n".join(lines)),
-                view=self
-            )
+                # Salva e atualiza UI
+                self._save(data)
+                self._update_buttons(data)
+                
+                await self.message.edit(
+                    embed=make_wild_embed(wild, data, "\n".join(lines)),
+                    view=self
+                )
 
-    except asyncio.CancelledError:
-        pass
-    except Exception as e:
-        print(f"[enemy_auto_attack] erro: {e}")
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            print(f"[enemy_auto_attack] erro: {e}")
 
     def _update_buttons(self, data):
         mon = get_active_mon(data)
