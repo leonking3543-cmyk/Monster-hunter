@@ -948,7 +948,9 @@ class BattleView(discord.ui.View):
         if not self._enemy_task or self._enemy_task.done():
             self._enemy_task = asyncio.create_task(self._enemy_auto_attack())
 
-    # ====================== OUTROS BOTÕES ======================    @discord.ui.button(label="🔮 Ball", style=discord.ButtonStyle.primary, custom_id="throw_ball", row=0)
+    # ====================== OUTROS BOTÕES ======================
+
+    @discord.ui.button(label="🔮 Ball (10)", style=discord.ButtonStyle.primary, custom_id="throw_ball", row=0)
     async def throw_ball(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.uid:
             await interaction.response.send_message("❌ Não é a tua batalha!", ephemeral=True)
@@ -1034,7 +1036,14 @@ class BattleView(discord.ui.View):
     async def on_timeout(self):
         self._cancel_tasks()
         try:
-            data
+            data = self._get_data()
+            clear_wild_state(data)
+            self._save(data)
+        except:
+            pass
+        try:
+            if self.message:
+                await self.message.delete()
         except:
             pass
 # ══════════════════════════════════════════════
@@ -1154,7 +1163,7 @@ async def hunt(interaction:discord.Interaction):
     await interaction.response.send_message(embed=make_wild_embed(wild,data,f"Um **{wild['n']}** selvagem apareceu!"),view=view)
     view.message=await interaction.original_response()
     # Inicia ataque automático do inimigo desde o início (a cada 10s)
-    view._enemy_task=asyncio.create_task(view._enemy_auto_attack(10))
+    view._enemy_task=asyncio.create_task(view._enemy_auto_attack())
 
 @tree.command(name="equipa",description="Vê a tua equipa")
 async def team_cmd(interaction:discord.Interaction):
