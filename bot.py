@@ -562,10 +562,10 @@ def make_wild_embed(wild,data,msg=""):
         sp=mon.get("species",mon.get("n","?"))
         embed.add_field(name=f"{alive} {mon.get('e','')} **{sp}** — Lv.{mon.get('level',1)} {tier_stars(mon.get('tier',1))}",value=f"{type_badge(mon.get('t','?'))}\n❤️ **{mon['hp']}/{mon['maxHp']}** · ⚔️ **{mon.get('atkStat','?')}**\n{mbar}\n{cd_txt}",inline=False)
     else:
-        embed.add_field(name="⚔️ Sem Monstro Ativo",value="Usa 🔮 Ball para capturar o teu primeiro monstro!",inline=False)
+        embed.add_field(name="⚔️ Sem Monstro Ativo",value="Podes atacar com as mãos 👊 ou usar 🔮 Ball para capturar!",inline=False)
     enemy_hits=data.get("enemyHits",0)
     max_hits=3 if is_nightmare_mode(data) else 5
-    embed.set_footer(text=f"⚔️ Lutar tem cooldown 5s · 🐾 Monster Fight · ⚠️ Inimigo ataca a cada 10s ({enemy_hits}/{max_hits}) · 🏃 Fugir")
+    embed.set_footer(text=f"⚔️ Lutar · ⚠️ Inimigo ataca a cada 10s ({enemy_hits}/{max_hits}) · 🏃 Fugir")
     return embed
 
 def make_boss_embed(data,msg=""):
@@ -767,17 +767,17 @@ class BattleView(discord.ui.View):
                 wild = data["wild"]
                 mon = get_active_mon(data)
 
-                # Se o inimigo é um Boss e ainda não foi "aceito", o inimigo não ataca
-                if wild.get("isBoss") and not data.get("bossAccepted"):
-                    continue
-
-                # Se o inimigo já foi derrotado
+                # Se o inimigo já foi derrotado (aguarda captura)
                 if wild.get("hp", 0) <= 0:
                     return
 
-                # Se o monstro do jogador morreu
-                if not mon or not mon.get("alive", True):
+                # Se o wild foi removido (fugiu ou capturou)
+                if not data.get("wild"):
                     return
+
+                # Se o monstro do jogador morreu ou não existe — não ataca
+                if not mon or not mon.get("alive", True):
+                    continue  # Aguarda próximo ciclo (jogador pode atacar com as mãos)
 
                 lines = []
                 refresh_mon_stats(mon)
@@ -789,12 +789,12 @@ class BattleView(discord.ui.View):
 
                 if mon["hp"] <= 0:
                     mon["alive"] = False
-                    lines.append("💀 Teu monstro desmaiou!")
-                    clear_wild_state(data)
+                    lines.append("💀 Teu monstro desmaiou! Ainda podes atacar com as mãos ou fugir.")
                     self._save(data)
+                    self._update_buttons(data)
                     await self.message.edit(
-                        embed=discord.Embed(title="💀 Monstro Desmaiou!", description="\n".join(lines), color=0xff0000),
-                        view=None
+                        embed=make_wild_embed(wild, data, "\n".join(lines)),
+                        view=self
                     )
                     return
 
@@ -810,86 +810,29 @@ class BattleView(discord.ui.View):
     def _update_buttons(self, data):
         mon = get_active_mon(data)
         can_fight = bool(mon and mon.get("alive", True))
+        # Sem monstro ativo, o jogador ainda pode atacar com as mãos
+        can_attack = True  # Sempre pode atacar (com ou sem monstro)
         wild = data.get("wild", {})
-        
-        is_boss = wild.get("isBoss", False)  # Vamos garantir que isto seja usado corretamente
 
         for child in self.children:
             cid = getattr(child, "custom_id", "")
-            
-            if cid == "accept_boss":
-                if is_boss and not data.get("bossAccepted", False):
-                    child.disabled = False
-                    child.label = "✅ Aceitar Desafio"
-                    child.style = discord.ButtonStyle.success
-                else:
-                    child.disabled = True
-                    child.label = "👹 Boss"
-                    child.style = discord.ButtonStyle.gray
 
-            elif cid in ("fight_mon", "monster_fight"):
-                if is_boss and not data.get("bossAccepted", False):
-                    child.disabled = True
-                    child.label = "⚔️ Aceite primeiro"
-                else:
-                    child.disabled = not can_fight
-                    child.label = "⚔️ Lutar" if can_fight else "💀 Monstro KO"
+            if cid == "fight_mon":
+                child.disabled = False  # Sempre pode atacar
+                child.label = "⚔️ Lutar" if can_fight else "👊 Atacar"
 
             elif cid == "throw_ball":
-                if is_boss and not data.get("bossAccepted", False):
-                    child.disabled = True
-                else:
-                    child.disabled = data.get("balls", 0) <= 0 or not can_fight
-                    child.label = f"🔮 Ball ({data.get('balls', 0)})"
+                child.disabled = data.get("balls", 0) <= 0
+                child.label = f"🔮 Ball ({data.get('balls', 0)})"
 
             elif cid == "throw_master":
-                if is_boss and not data.get("bossAccepted", False):
-                    child.disabled = True
-                else:
-                    child.disabled = data.get("masterball", 0) <= 0 or not can_fight
-                    child.label = f"⭐ Master ({data.get('masterball', 0)})"
+                child.disabled = data.get("masterball", 0) <= 0
+                child.label = f"⭐ Master ({data.get('masterball', 0)})"
 
             elif cid == "flee":
                 child.disabled = False
 
-    # ====================== BOTÃO ACEITAR DESAFIO (NOVO) ======================
-    @discord.ui.button(label="👹 Boss", style=discord.ButtonStyle.secondary, custom_id="accept_boss", row=0)
-    async def accept_boss(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.uid:
-            await interaction.response.send_message("❌ Não é a tua batalha!", ephemeral=True)
-            return
-
-        data = self._get_data()
-        if not data.get("inBattle") or not data.get("wild"):
-            await interaction.response.edit_message(content="❌ Sem batalha ativa.", embed=None, view=None)
-            return
-
-        wild = data["wild"]
-        if not wild.get("isBoss"):
-            await interaction.response.send_message("❌ Isso não é um Boss!", ephemeral=True)
-            return
-
-        if data.get("bossAccepted"):
-            await interaction.response.send_message("⚠️ Já aceitaste o desafio!", ephemeral=True)
-            return
-
-        # Aceita o desafio
-        data["bossAccepted"] = True
-        self._save(data)
-        self._update_buttons(data)
-
-        # Atualiza a mensagem para mostrar que o desafio foi aceito
-        await interaction.response.edit_message(
-            embed=make_wild_embed(wild, data, "✅ **Desafio Aceito!** O Boss está furioso! Prepare-se!"),
-            view=self
-        )
-
-        # Inicia a task de ataque do inimigo AGORA
-        if self._enemy_task and not self._enemy_task.done():
-            self._enemy_task.cancel()
-        self._enemy_task = asyncio.create_task(self._enemy_auto_attack())
-
-    # ====================== BOTÃO LUTAR (SEM COOLDOWN, SEM FUGA POR ATAQUES) ======================
+    # ====================== BOTÃO LUTAR ======================
     @discord.ui.button(label="⚔️ Lutar", style=discord.ButtonStyle.danger, custom_id="fight_mon", row=0)
     async def fight_mon(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.uid:
@@ -901,79 +844,87 @@ class BattleView(discord.ui.View):
             await interaction.response.edit_message(content="❌ Sem batalha ativa. Usa `/caçar`.", embed=None, view=None)
             return
 
-        # Verifica se é Boss e se foi aceito
         wild = data["wild"]
-        if wild.get("isBoss") and not data.get("bossAccepted"):
-            await interaction.response.send_message("⚠️ Aceita o desafio primeiro!", ephemeral=True)
-            return
-
         mon = get_active_mon(data)
         lines = []
 
+        # Raridade -> bónus de dano das mãos (escalado)
+        RARE_HAND_DMG = {"comum": (6, 10), "incomum": (9, 15), "raro": (13, 20),
+                         "épico": (18, 28), "lendário": (25, 38), "mítico": (33, 50)}
+
         # Ataque do Jogador
         if not mon or not mon.get("alive", True):
-            dmg = max(1, int(8 + random.random() * 6))
+            # Sem monstro: ataca com as mãos, dano escala com raridade do inimigo
+            rare = wild.get("rare", "comum")
+            lo, hi = RARE_HAND_DMG.get(rare, (6, 10))
+            dmg = max(1, int(lo + random.random() * (hi - lo)))
+            # Aplica bónus de rebirth
+            db = 1 + data.get("rebirthCount", 0) * 0.5
+            dmg = max(1, int(dmg * db))
             wild["hp"] = max(0, wild.get("hp", 0) - dmg)
             lines.append(f"👊 Atacaste com as mãos! **-{dmg}** HP")
+            # Sem monstro, inimigo não contra-ataca (sem alvo)
         else:
             refresh_mon_stats(mon)
-            at, _ = get_type_effect(mon.get("t", ""), wild.get("t", ""))
+            at, effect = get_type_effect(mon.get("t", ""), wild.get("t", ""))
             db = 1 + data.get("rebirthCount", 0) * 0.5
             xb = 1.6 if data.get("xatkActive", False) else 1.0
             if data.get("xatkActive", False):
                 data["xatkActive"] = False
 
             dmg = max(1, int(mon["atkStat"] * (0.75 + random.random() * 0.45) * db * at * xb))
-            
-            # Se for Boss, o contra-ataque é mais forte
-            if wild.get("isBoss"):
-                ret = max(1, int(wild.get("atk", 5) * random.uniform(0.8, 1.2)))
-            else:
-                ret = max(1, int(wild.get("atk", 5) * random.uniform(0.5, 0.95)))
+            ret = max(1, int(wild.get("atk", 5) * random.uniform(0.5, 0.95)))
 
             wild["hp"] = max(0, wild.get("hp", 0) - dmg)
             mon["hp"] = max(0, mon["hp"] - ret)
 
-            if at > 1:
+            if effect == "advantage":
                 lines.append(f"⚡ **Super eficaz!** Causaste **{dmg}** dano!")
+            elif effect == "disadvantage":
+                lines.append(f"💧 *Pouco eficaz...* Causaste **{dmg}** dano.")
             else:
                 lines.append(f"⚔️ Causaste **{dmg}** dano!")
-            
-            if ret > 0:
-                lines.append(f"🗡️ Inimigo contra-atacou! **-{ret}** HP")
-            else:
-                lines.append("🛡️ O inimigo bloqueou o ataque!")
 
+            lines.append(f"🗡️ Inimigo contra-atacou! **-{ret}** HP")
             gainXp(mon, 8 + int(wild.get("atk", 5) * 1.6), data)
 
-        # Verifica Vitória
+        # Verifica Vitória — NÃO limpa o wild state: deixa o jogador capturar!
         if wild.get("hp", 0) <= 0:
             wild["hp"] = 0
-            lines.append(f"✅ **{wild['n']}** derrotado! Usa 🔮 Ball para capturar.")
-            if wild.get("isBoss"):
-                data["bossDefeated"] = True
-                lines.append("🏆 **Boss Derrotado!** Grande recompensa!")
-            
+            data["wild"] = wild  # Atualiza HP a 0 mas mantém o wild para capturar
             data["battleBonus"] = min(0.65, data.get("battleBonus", 0) + 0.15)
-            clear_wild_state(data)
+            lines.append(f"✅ **{wild['n']}** está KO! Usa 🔮 Ball para capturar, ou 🏃 Fugir.")
+            self._cancel_tasks()
+
+            # Atualiza botões: só Ball/Master/Fugir disponíveis
+            for child in self.children:
+                cid = getattr(child, "custom_id", "")
+                if cid == "fight_mon":
+                    child.disabled = True
+                    child.label = "💀 KO"
+                elif cid == "throw_ball":
+                    child.disabled = data.get("balls", 0) <= 0
+                    child.label = f"🔮 Ball ({data.get('balls', 0)})"
+                elif cid == "throw_master":
+                    child.disabled = data.get("masterball", 0) <= 0
+                    child.label = f"⭐ Master ({data.get('masterball', 0)})"
+
             self._save(data)
-            
             await interaction.response.edit_message(
                 embed=make_wild_embed(wild, data, "\n".join(lines)),
-                view=None
+                view=self
             )
-            self._cancel_tasks()
             return
 
         # Verifica Derrota do Monstro
         if mon and mon.get("hp", 0) <= 0:
             mon["alive"] = False
-            lines.append(f"💀 Teu monstro desmaiou!")
-            clear_wild_state(data)
+            lines.append("💀 Teu monstro desmaiou! Ainda podes atacar com as mãos ou fugir.")
             self._save(data)
+            self._update_buttons(data)
             await interaction.response.edit_message(
-                embed=discord.Embed(title="💀 Monstro Desmaiou!", description="\n".join(lines), color=0xff0000),
-                view=None
+                embed=make_wild_embed(wild, data, "\n".join(lines)),
+                view=self
             )
             self._cancel_tasks()
             return
@@ -981,7 +932,7 @@ class BattleView(discord.ui.View):
         # Se a batalha continua
         self._save(data)
         self._update_buttons(data)
-        
+
         if not self.message:
             try:
                 self.message = await interaction.original_response()
@@ -997,12 +948,7 @@ class BattleView(discord.ui.View):
         if not self._enemy_task or self._enemy_task.done():
             self._enemy_task = asyncio.create_task(self._enemy_auto_attack())
 
-    # ====================== OUTROS BOTÕES ======================
-    @discord.ui.button(label="🐾 Monster Fight", style=discord.ButtonStyle.success, custom_id="monster_fight", row=0)
-    async def monster_fight(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.fight_mon(interaction, button)
-
-    @discord.ui.button(label="🔮 Ball", style=discord.ButtonStyle.primary, custom_id="throw_ball", row=0)
+    # ====================== OUTROS BOTÕES ======================    @discord.ui.button(label="🔮 Ball", style=discord.ButtonStyle.primary, custom_id="throw_ball", row=0)
     async def throw_ball(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.uid:
             await interaction.response.send_message("❌ Não é a tua batalha!", ephemeral=True)
@@ -1014,10 +960,6 @@ class BattleView(discord.ui.View):
             return
 
         wild = data["wild"]
-        if wild.get("isBoss") and not data.get("bossAccepted"):
-            await interaction.response.send_message("⚠️ Aceita o desafio primeiro!", ephemeral=True)
-            return
-
         if data.get("balls", 0) <= 0:
             await interaction.response.send_message("❌ Sem Balls!", ephemeral=True)
             return
@@ -1059,10 +1001,6 @@ class BattleView(discord.ui.View):
             return
 
         wild = data["wild"]
-        if wild.get("isBoss") and not data.get("bossAccepted"):
-            await interaction.response.send_message("⚠️ Aceita o desafio primeiro!", ephemeral=True)
-            return
-
         if data.get("masterball", 0) <= 0:
             await interaction.response.send_message("❌ Sem Master Ball!", ephemeral=True)
             return
