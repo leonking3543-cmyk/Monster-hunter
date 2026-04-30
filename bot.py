@@ -3093,20 +3093,18 @@ async def monster_image(interaction: discord.Interaction, nome: str):
     await interaction.response.defer(thinking=True)
 
     nome_lower = nome.lower()
-entry = (
-    MON_INDEX.get(nome) or
-    MON_INDEX.get(nome.title()) or
-    next((m for m in MONS if m["n"].lower() == nome_lower), None) or
-    next((m for m in MONS if m["n"].lower().startswith(nome_lower)), None) or
-    BOSS_INDEX.get(nome) or
-    next((b for b in BOSSES if b["n"].lower() == nome_lower), None) or
-    next((b for b in BOSSES if b["n"].lower().startswith(nome_lower)), None)
-)
-
+    entry = (
+        MON_INDEX.get(nome) or
+        MON_INDEX.get(nome.title()) or
+        next((m for m in MONS if m["n"].lower() == nome_lower), None) or
+        next((m for m in MONS if m["n"].lower().startswith(nome_lower)), None) or
+        BOSS_INDEX.get(nome) or
+        next((b for b in BOSSES if b["n"].lower() == nome_lower), None) or
+        next((b for b in BOSSES if b["n"].lower().startswith(nome_lower)), None)
+    )
     if not entry:
         await interaction.followup.send(f"❌ Monster **{nome}** não encontrado!", ephemeral=True)
         return
-
     try:
         mon_name = entry["n"]
 
