@@ -10,6 +10,36 @@ import json, os, random, math, asyncio, time
 from typing import Optional
 
 # ══════════════════════════════════════════════
+# CONFIGURAÇÕES DE SAVE (NOVO)
+# ══════════════════════════════════════════════
+
+SAVE_VERSION = 2   # ← Aumente este número quando mudar a estrutura do save
+
+def migrate_save(data: dict) -> dict:
+    """Migra saves antigos automaticamente"""
+    version = data.get("save_version", 0)
+
+    if version < 1:
+        data.setdefault("team", [])
+        data.setdefault("box", [])
+        data.setdefault("caught", [])
+        data.setdefault("bossDefeated", [])
+        data.setdefault("items", {})
+        data.setdefault("materials", {})
+        data.setdefault("rankedElo", 1200)
+        data.setdefault("rebirthCount", 0)
+        data.setdefault("playerName", None)
+
+    if version < 2:
+        # Migração para rebirth bonus nos monstros
+        for mon in data.get("team", []) + data.get("box", []):
+            if "_rebirthBonus" not in mon:
+                mon["_rebirthBonus"] = data.get("rebirthCount", 0) * 0.5
+
+    data["save_version"] = SAVE_VERSION
+    return data
+
+# ══════════════════════════════════════════════
 # DADOS DO JOGO (sincronizados com HTML)
 # ══════════════════════════════════════════════
 
@@ -710,12 +740,14 @@ def load_save(uid):
             except: pass
     return default_save()
 
-def write_save(uid,data):
-    p=save_path(uid); tmp=p+".tmp"
+def write_save(uid, data):
+    os.makedirs("saves", exist_ok=True)
+    path = f"saves/{uid}.json"
     try:
-        with open(tmp,"w",encoding="utf-8") as f: json.dump(data,f,ensure_ascii=False,indent=2)
-        os.replace(tmp,p)
-    except Exception as e: print(f"Erro ao guardar {uid}: {e}")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Erro ao salvar {uid}: {e}")
 
 def clear_wild_state(data):
     data["inBattle"]=False; data["wild"]=None; data["battleBonus"]=0
@@ -738,8 +770,35 @@ def sanitize_save(data):
     return changed
 
 def load_clean_save(uid):
-    data=load_save(uid)
-    if sanitize_save(data): write_save(uid,data)
+    os.makedirs("saves", exist_ok=True)
+    path = f"saves/{uid}.json"
+    
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            data = migrate_save(data)   # Migração automática
+            return data
+        except Exception as e:
+            print(f"Erro ao carregar save {uid}: {e}")
+
+    # Novo jogador
+    data = {
+        "save_version": SAVE_VERSION,
+        "gold": 50,
+        "balls": 10,
+        "team": [],
+        "box": [],
+        "caught": [],
+        "bossDefeated": [],
+        "activeMonId": None,
+        "items": {},
+        "materials": {},
+        "rankedElo": 1200,
+        "rebirthCount": 0,
+        "playerName": None,
+    }
+    write_save(uid, data)
     return data
 
 def get_active_mon(data):
@@ -1785,76 +1844,107 @@ async def _gerar_descricao_visual_claude(mon_name, mon_type, mon_rare, mon_emoji
             data = await resp.json()
             return data["choices"][0]["message"]["content"].strip()
 
-@tree.command(name="imagem", description="Gera uma imagem artística de um monster")
-@app_commands.describe(nome="Nome do monster (ex: Flaminho, Rei das Chamas...)")
-async def monster_image(interaction: discord.Interaction, nome: str):
-    import aiohttp, io, urllib.parse
+# ══════════════════════════════════════════════
+# GERAÇÃO DE IMAGEM (Melhorada e Gratuita)
+# ══════════════════════════════════════════════
 
-    # Procura o monster nos índices
-    mon_data = MON_INDEX.get(nome) or next(
-        (m for m in MONS if nome.lower() in m["n"].lower()), None)
-    boss_data = BOSS_INDEX.get(nome) or next(
-        (b for b in BOSSES if nome.lower() in b["n"].lower()), None)
+async def gerar_prompt_imagem(mon):
+    """Gera prompt detalhado para o Flux no Pollinations"""
+    nome = mon.get("n", "Monstro")
+    tipo = mon.get("t", "").lower()
+    emoji = mon.get("e", "❓")
+    rare = mon.get("rare", "comum").lower()
+    is_boss = mon.get("hp", 0) > 800 or bool(mon.get("title")) or rare in ["boss", "mítico", "lendário", "divino"]
+
+    type_descriptions = {
+        "néon": "cyberpunk neon creature, glowing cyan magenta and pink circuits, digital glitch effects, holographic elements, vibrant neon lights, synthwave aesthetic, futuristic digital monster, LED accents, pixel details, high tech",
+        "fogo": "fiery elemental creature made of living flames and magma, glowing orange red and yellow, lava cracks on skin, intense fire aura, floating embers",
+        "água": "translucent aquatic being made of flowing water, deep blue cyan tones, bubbles and water ripples, elegant liquid form",
+        "planta": "verdant plant creature covered in leaves vines and flowers, vibrant green, organic textures, glowing bioluminescence",
+        "dragão": "majestic dragon with powerful scaled body, large wings, sharp horns, fierce expression, fantasy dragon",
+        "sombra": "ethereal shadowy creature, dark purple and black with glowing eyes, smoky tendrils, mysterious dark aura",
+        "trovão": "electric creature crackling with lightning, bright yellow blue sparks, energetic pose, thunder effects",
+        "gelo": "crystalline ice creature with sharp frost edges, cool blue white tones, snow particles, frozen majestic form",
+        "metal": "heavily armored mechanical golem made of steel and gears, metallic shine, industrial details",
+        "fantasma": "translucent ghostly being, ethereal glow, floating form, spooky beautiful fantasy ghost",
+        "nuclear": "radioactive mutant creature, glowing green toxic aura, deformed body, nuclear energy effects",
+        "cosmos": "cosmic entity with galaxies and stars inside body, nebulae, space theme, celestial being",
+        "arcano": "mystical arcane creature with glowing runes, magical aura, purple and gold tones",
+    }
+
+    rarity_boost = {
+        "comum": "cute small monster",
+        "incomum": "detailed interesting creature",
+        "raro": "impressive powerful monster",
+        "épico": "epic majestic creature, highly detailed",
+        "lendário": "legendary powerful being, radiant aura",
+        "mítico": "mythical divine creature, glowing divine energy",
+        "boss": "colossal terrifying boss monster, massive scale, menacing presence"
+    }.get(rare, "fantasy monster")
+
+    prompt = (
+        f"{nome}, {rarity_boost}, {type_descriptions.get(tipo, f'{tipo} elemental fantasy creature')}, "
+        f"representing emoji {emoji}, dynamic pose, intricate details, vibrant colors, sharp focus, "
+        f"fantasy RPG monster concept art, best quality, highly detailed, cinematic lighting"
+    )
+
+    if is_boss:
+        prompt += ", epic boss fight atmosphere, dark dramatic background, intense volumetric lighting"
+
+    prompt += ", fantasy style, no text, clean composition"
+
+    return prompt
+
+@tree.command(name="imagem", description="Gera uma imagem artística de um monster")
+@app_commands.describe(nome="Nome do monster (ex: Néonix, Flaminho...)")
+async def monster_image(interaction: discord.Interaction, nome: str):
+    await interaction.response.defer(thinking=True)
+
+    # Busca o monstro
+    mon_data = MON_INDEX.get(nome) or next((m for m in MONS if nome.lower() in m["n"].lower()), None)
+    boss_data = BOSS_INDEX.get(nome) or next((b for b in BOSSES if nome.lower() in b["n"].lower()), None)
     entry = mon_data or boss_data
 
     if not entry:
-        await interaction.response.send_message(
-            f"❌ Monster **{nome}** não encontrado! Verifica o nome em `/pokedex` ou `/inventario`.",
-            ephemeral=True); return
-
-    mon_name   = entry["n"]
-    mon_emoji  = entry.get("e", "❓")
-    mon_type   = entry.get("t", "desconhecido")
-    mon_rare   = entry.get("rare", "boss" if boss_data else "comum")
-    is_boss    = boss_data is not None
-    title_lore = entry.get("title", "")
-    atk        = entry.get("atk", "?")
-    hp         = entry.get("hp", "?")
-
-    await interaction.response.defer(thinking=True)
+        await interaction.followup.send(f"❌ Monster **{nome}** não encontrado!", ephemeral=True)
+        return
 
     try:
-        # Passo 1: Claude gera um prompt visual preciso e fiel ao monster
-        image_prompt = await _gerar_descricao_visual_claude(
-            mon_name, mon_type, mon_rare, mon_emoji, is_boss, title_lore, atk, hp
-        )
-        print(f"[imagem] prompt gerado para {mon_name}: {image_prompt[:80]}...")
+        prompt = await gerar_prompt_imagem(entry)
+        
+        encoded = urllib.parse.quote(prompt)
+        seed = abs(hash(entry["n"] + str(entry.get("t", "")))) % 999999
 
-        # Passo 2: Pollinations gera a imagem com esse prompt
-        encoded = urllib.parse.quote(image_prompt)
-        seed = abs(hash(mon_name + mon_type)) % 99999
-        img_url = (
-            f"https://image.pollinations.ai/prompt/{encoded}"
-            f"?width=512&height=512&nologo=true&seed={seed}&model=flux"
-        )
+        img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=768&height=768&nologo=true&seed={seed}&model=flux"
 
         async with aiohttp.ClientSession() as session:
-            async with session.get(img_url, timeout=aiohttp.ClientTimeout(total=45)) as resp:
+            async with session.get(img_url, timeout=45) as resp:
                 if resp.status != 200:
                     raise Exception(f"Pollinations HTTP {resp.status}")
                 img_bytes = await resp.read()
 
-        # Passo 3: Envia embed com a imagem
-        color = RARE_COLOR.get(mon_rare, 0x888888)
+        file = discord.File(io.BytesIO(img_bytes), filename="monster.png")
+
+        color = RARE_COLOR.get(entry.get("rare", "comum"), 0x888888)
         embed = discord.Embed(
-            title=f"{mon_emoji} {mon_name}",
-            description=(
-                f"{type_badge(mon_type)} · {rare_badge(mon_rare)}"
-                + (f"\n*{title_lore}*" if title_lore else "")
-                + f"\n⚔️ ATK: **{atk}** · ❤️ HP: **{hp}**"
-            ),
+            title=f"{entry.get('e', '❓')} {entry['n']}",
+            description=f"{type_badge(entry.get('t', ''))} • {rare_badge(entry.get('rare', 'comum'))}",
             color=color
         )
-        embed.set_image(url="attachment://monster.png")
-        embed.set_footer(text="🎨 Descrição gerada por Claude • Imagem por Pollinations AI")
+        if entry.get("title"):
+            embed.description += f"\n*{entry['title']}*"
 
-        file = discord.File(io.BytesIO(img_bytes), filename="monster.png")
+        embed.set_image(url="attachment://monster.png")
+        embed.set_footer(text="🎨 Gerado com Flux via Pollinations AI")
+
         await interaction.followup.send(embed=embed, file=file)
 
     except Exception as e:
-        print(f"[imagem] erro: {e}")
+        print(f"[ERRO IMAGEM] {entry.get('n', nome)}: {e}")
         await interaction.followup.send(
-            f"❌ Erro ao gerar imagem de **{mon_name}**. Tenta novamente mais tarde.", ephemeral=True)
+            f"❌ Erro ao gerar imagem de **{entry.get('n', nome)}**. Tenta novamente mais tarde.",
+            ephemeral=True
+        )
 
 @tree.command(name="ajuda",description="Mostra todos os comandos")
 async def help_cmd(interaction:discord.Interaction):
