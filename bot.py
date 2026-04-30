@@ -59,6 +59,7 @@ async def generate_image_with_queue(prompt: str, max_attempts: int = 5) -> bytes
                 if attempt < max_attempts - 1:
                     await asyncio.sleep(5)
     raise Exception(f"Falha após {max_attempts} tentativas. Último erro: {last_err}")
+
 # ══════════════════════════════════════════════
 # CONFIGURAÇÕES DE SAVE (NOVO)
 # ══════════════════════════════════════════════
@@ -1303,7 +1304,7 @@ def save_cached_monster_image(name: str, img_bytes: bytes) -> bool:
 async def _fetch_monster_image_bytes(entry):
     """Gera (via Pollinations AI) os bytes da imagem de um monstro. Não usa cache."""
     prompt = await gerar_prompt_imagem(entry)
-    return await generate_image_with_queue(prompt)
+    return await generate_monster_image_safe(prompt)
 
 # Carrega URLs ao iniciar
 _load_image_url_cache()
@@ -3084,14 +3085,19 @@ async def gerar_prompt_imagem(mon):
     return prompt
 
 
+OWNER_ID = 1322369063132860476
+
 class RefazerImagemView(discord.ui.View):
-    """Botão 🔄 Refazer que apaga o cache e gera uma nova imagem."""
+    """Botão 🔄 Refazer que apaga o cache e gera uma nova imagem (só o dono do bot)."""
     def __init__(self, entry: dict):
         super().__init__(timeout=120)
         self.entry = entry
 
     @discord.ui.button(label="🔄 Refazer imagem", style=discord.ButtonStyle.secondary)
     async def refazer(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != OWNER_ID:
+            await interaction.response.send_message("❌ Só o dono do bot pode refazer imagens.", ephemeral=True)
+            return
         mon_name = self.entry["n"]
         button.disabled = True
         button.label = "⏳ A gerar..."
@@ -3114,7 +3120,7 @@ class RefazerImagemView(discord.ui.View):
                     raise
             if img_bytes is None:
                 raise Exception(f"Pollinations AI indisponível ({last_err})")
-            safe_filename = f"{_img_cache_key(mon_name)}.png"
+            safe_filename = f"{_img_cache_key(mon_name)}_{int(time.time())}.png"
             discord_url = await upload_image_to_discord_cache(bot, img_bytes, safe_filename)
             desc_line = self.entry.get("desc", f"{self.entry.get('t','').capitalize()} • {self.entry.get('rare','')}")
             embed = discord.Embed(
