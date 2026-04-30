@@ -8,6 +8,7 @@ from discord.ext import commands
 from discord import app_commands
 import json, os, random, math, asyncio, time
 from typing import Optional
+import urllib.parse
 
 # ══════════════════════════════════════════════
 # CONFIGURAÇÕES DE SAVE (NOVO)
