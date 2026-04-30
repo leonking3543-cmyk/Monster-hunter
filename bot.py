@@ -1158,6 +1158,68 @@ os.makedirs(SAVE_DIR, exist_ok=True)
 
 def save_path(uid): return os.path.join(SAVE_DIR,f"{uid}.json")
 
+# ============================================================
+# CACHE DE IMAGENS DE MONSTROS
+# Quando alguém gera a imagem de um monstro pela primeira vez,
+# fica guardada em disco. Próximas chamadas reutilizam a mesma.
+# ============================================================
+IMAGE_CACHE_DIR = os.path.join(SAVE_DIR, "monster_images")
+os.makedirs(IMAGE_CACHE_DIR, exist_ok=True)
+print(f"[img-cache] usando diretório: {IMAGE_CACHE_DIR}")
+
+def _img_cache_key(name: str) -> str:
+    """Normaliza o nome do monstro para um nome de ficheiro seguro."""
+    import re as _re
+    safe = _re.sub(r"[^a-zA-Z0-9_-]+", "_", (name or "").strip().lower())
+    return safe or "unknown"
+
+def get_cached_monster_image(name: str):
+    """Devolve os bytes da imagem em cache, ou None se não existir."""
+    path = os.path.join(IMAGE_CACHE_DIR, f"{_img_cache_key(name)}.png")
+    if os.path.exists(path):
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+            if len(data) >= 1000:
+                return data
+        except Exception as e:
+            print(f"[img-cache] erro a ler {path}: {e}")
+    return None
+
+def save_cached_monster_image(name: str, img_bytes: bytes) -> bool:
+    """Guarda a imagem do monstro em disco para reutilização futura."""
+    if not img_bytes or len(img_bytes) < 1000:
+        return False
+    path = os.path.join(IMAGE_CACHE_DIR, f"{_img_cache_key(name)}.png")
+    try:
+        with open(path, "wb") as f:
+            f.write(img_bytes)
+        print(f"[img-cache] guardada: {path} ({len(img_bytes)} bytes)")
+        return True
+    except Exception as e:
+        print(f"[img-cache] erro a guardar {path}: {e}")
+        return False
+
+async def _fetch_monster_image_bytes(entry):
+    """Gera (via Pollinations) os bytes da imagem de um monstro. Não usa cache."""
+    import aiohttp as _aiohttp
+    prompt = await gerar_prompt_imagem(entry)
+    encoded = urllib.parse.quote(prompt)
+    seed = random.randint(100000, 999999)
+    img_url = (
+        f"https://image.pollinations.ai/prompt/{encoded}"
+        f"?width=512&height=512&nologo=true&seed={seed}&model=turbo"
+    )
+    timeout = _aiohttp.ClientTimeout(total=90, connect=15)
+    async with _aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.get(img_url) as resp:
+            if resp.status != 200:
+                raise Exception(f"Pollinations status {resp.status}")
+            data = await resp.read()
+            if len(data) < 1000:
+                raise Exception("Imagem vazia/corrompida")
+            return data
+
 def default_save():
     return {
         "gold":0,"balls":10,"masterball":0,"items":{},"materials":{},"caught":[],"bossDefeated":[],
@@ -2949,13 +3011,32 @@ async def monster_image(interaction: discord.Interaction, nome: str):
         return
 
     try:
+        mon_name = entry["n"]
+
+        # 1) Tenta servir do cache primeiro
+        cached = get_cached_monster_image(mon_name)
+        if cached:
+            print(f"[IMG] {mon_name} → cache HIT ({len(cached)} bytes)")
+            file = discord.File(io.BytesIO(cached), filename="monster.png")
+            desc_line = entry.get("desc", f"{entry.get('t','').capitalize()} • {entry.get('rare','')}")
+            embed = discord.Embed(
+                title=f"{entry.get('e','❓')} {mon_name}",
+                description=desc_line,
+                color=RARE_COLOR.get(entry.get("rare"), 0x888888)
+            )
+            embed.set_image(url="attachment://monster.png")
+            embed.set_footer(text="🎨 Imagem guardada (cache)")
+            await interaction.followup.send(embed=embed, file=file)
+            return
+
+        # 2) Não está em cache → gera com Pollinations
         prompt = await gerar_prompt_imagem(entry)
 
         encoded = urllib.parse.quote(prompt)
         seed = random.randint(100000, 999999)
-        img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=768&height=768&nologo=true&seed={seed}&model=flux"
+        img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=512&height=512&nologo=true&seed={seed}&model=turbo"
 
-        print(f"[IMG] {entry['n']} | tipo={entry.get('t')} | prompt={prompt[:120]}")
+        print(f"[IMG] {mon_name} → cache MISS | tipo={entry.get('t')} | prompt={prompt[:120]}")
 
         timeout = aiohttp.ClientTimeout(total=60, connect=10)
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -2968,11 +3049,14 @@ async def monster_image(interaction: discord.Interaction, nome: str):
                 if len(img_bytes) < 1000:
                     raise Exception("Imagem retornada está vazia ou corrompida")
 
+        # 3) Guarda em cache para próximas vezes
+        save_cached_monster_image(mon_name, img_bytes)
+
         file = discord.File(io.BytesIO(img_bytes), filename="monster.png")
 
         desc_line = entry.get("desc", f"{entry.get('t','').capitalize()} • {entry.get('rare','')}")
         embed = discord.Embed(
-            title=f"{entry.get('e','❓')} {entry['n']}",
+            title=f"{entry.get('e','❓')} {mon_name}",
             description=desc_line,
             color=RARE_COLOR.get(entry.get("rare"), 0x888888)
         )
@@ -3035,6 +3119,52 @@ async def on_ready():
     except Exception as e:
         print(f"Erro sync: {e}"); import traceback; traceback.print_exc()
     await bot.change_presence(activity=discord.Game(name="/ajuda | Monster Hunter RPG"))
+
+    # Pré-geração de imagens em background (silenciosa, não bloqueia o bot)
+    asyncio.create_task(_pregenerate_monster_images())
+
+async def _pregenerate_monster_images():
+    """Gera em background as imagens de todos os monsters/bosses que ainda
+    não estão em cache. Lento mas silencioso. Após terminar (algumas horas),
+    todas as chamadas a /imagem serão instantâneas (cache HIT)."""
+    await asyncio.sleep(15)  # dá tempo ao bot de assentar antes de começar
+    try:
+        all_entries = []
+        seen = set()
+        for src in (MONS, BOSSES):
+            for m in src:
+                key = _img_cache_key(m.get("n", ""))
+                if key in seen:
+                    continue
+                seen.add(key)
+                all_entries.append(m)
+
+        pending = [m for m in all_entries if not get_cached_monster_image(m["n"])]
+        total = len(pending)
+        if total == 0:
+            print("[img-pregen] todas as imagens já estão em cache ✅")
+            return
+
+        print(f"[img-pregen] iniciando pré-geração de {total} imagens em background…")
+        done = 0
+        fail = 0
+        for m in pending:
+            try:
+                if get_cached_monster_image(m["n"]):
+                    continue  # outro caller já gerou entretanto
+                data = await _fetch_monster_image_bytes(m)
+                save_cached_monster_image(m["n"], data)
+                done += 1
+                if done % 10 == 0:
+                    print(f"[img-pregen] progresso: {done}/{total} (falhas: {fail})")
+            except Exception as e:
+                fail += 1
+                print(f"[img-pregen] falha em {m.get('n','?')}: {e}")
+            # pausa para não sobrecarregar o Pollinations (free tier)
+            await asyncio.sleep(3)
+        print(f"[img-pregen] concluído ✅ geradas={done} falhas={fail} total={total}")
+    except Exception as e:
+        print(f"[img-pregen] erro fatal: {e}")
 
 @tree.error
 async def on_error(interaction:discord.Interaction,error:app_commands.AppCommandError):
