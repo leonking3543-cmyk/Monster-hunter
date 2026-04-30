@@ -606,8 +606,24 @@ def make_boss_embed(data,msg=""):
 # PERSISTÊNCIA
 # ══════════════════════════════════════════════
 
-SAVE_DIR="saves"
-os.makedirs(SAVE_DIR,exist_ok=True)
+# Railway: monta um Volume em /data para persistência entre deploys.
+# Se /data existir e for gravável usa-o; caso contrário usa pasta local "saves".
+def _pick_save_dir():
+    for candidate in ["/data/saves", "saves"]:
+        try:
+            os.makedirs(candidate, exist_ok=True)
+            # testa se consegue escrever
+            test = os.path.join(candidate, ".write_test")
+            with open(test, "w") as f: f.write("ok")
+            os.remove(test)
+            print(f"[saves] usando diretório: {candidate}")
+            return candidate
+        except Exception as e:
+            print(f"[saves] {candidate} não disponível: {e}")
+    return "saves"
+
+SAVE_DIR = _pick_save_dir()
+os.makedirs(SAVE_DIR, exist_ok=True)
 
 def save_path(uid): return os.path.join(SAVE_DIR,f"{uid}.json")
 
@@ -1739,23 +1755,35 @@ async def _gerar_descricao_visual_claude(mon_name, mon_type, mon_rare, mon_emoji
         f"Background should reflect the '{mon_type}' environment. No text in image."
     )
 
+    # OpenRouter — compatível com OpenAI API, suporta vários modelos gratuitos
     payload = {
-        "model": "claude-sonnet-4-20250514",
+        "model": "meta-llama/llama-3.3-70b-instruct:free",
         "max_tokens": 300,
-        "system": system_prompt,
-        "messages": [{"role": "user", "content": user_msg}]
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_msg}
+        ]
     }
 
+    api_key = os.environ.get("OPENROUTER_API_KEY", "")
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/leonking3543-cmyk/Monster-hunter",
+        "X-Title": "Monster Hunter RPG Bot",
+    }
     async with aiohttp.ClientSession() as session:
         async with session.post(
-            "https://api.anthropic.com/v1/messages",
+            "https://openrouter.ai/api/v1/chat/completions",
             json=payload,
-            timeout=aiohttp.ClientTimeout(total=20)
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=30)
         ) as resp:
             if resp.status != 200:
-                raise Exception(f"Claude API HTTP {resp.status}")
+                body = await resp.text()
+                raise Exception(f"OpenRouter HTTP {resp.status}: {body[:200]}")
             data = await resp.json()
-            return data["content"][0]["text"].strip()
+            return data["choices"][0]["message"]["content"].strip()
 
 @tree.command(name="imagem", description="Gera uma imagem artística de um monster")
 @app_commands.describe(nome="Nome do monster (ex: Flaminho, Rei das Chamas...)")
