@@ -6,10 +6,16 @@ Sincronizado com monster_hunter_V117.html — mecânicas, HUD e sistema de batal
 import discord
 from discord.ext import commands
 from discord import app_commands
-import json, os, random, math, asyncio, time
-from typing import Optional
+import json
+import os
+import random
+import math
+import asyncio
+import time
 import urllib.parse
-
+import aiohttp
+import io
+from typing import Optional
 # ══════════════════════════════════════════════
 # CONFIGURAÇÕES DE SAVE (NOVO)
 # ══════════════════════════════════════════════
