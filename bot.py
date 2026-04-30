@@ -40,9 +40,18 @@ async def generate_monster_image_safe(mon_name: str, prompt: str) -> bytes:
     encoded_prompt = urllib.parse.quote(prompt)
     url = (
         f"https://image.pollinations.ai/prompt/{encoded_prompt}"
-        f"?width=512&height=512&model=flux&seed={fixed_seed}&nologo=true&enhance=false"
+        f"?width=512&height=512&model=flux&seed={seed}&nologo=true&enhance=false"
     )
 
+    timeout = aiohttp.ClientTimeout(total=180, connect=20)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.get(url) as resp:
+            if resp.status == 429:
+                raise Exception("429") # Rate limit
+            if resp.status != 200:
+                raise Exception(f"Erro HTTP {resp.status}")
+            return await resp.read()
+            
     async with _image_lock: # FILA: Só entra um de cada vez aqui
         for attempt in range(5):
             # Espera se o rate-limit global ainda estiver ativo
@@ -73,6 +82,8 @@ async def generate_monster_image_safe(mon_name: str, prompt: str) -> bytes:
                 await asyncio.sleep(5)
 
     raise Exception("Não foi possível gerar a imagem após várias tentativas.")
+    
+    _image_lock = asyncio.Lock()
 async def generate_image_with_queue(prompt: str, max_attempts=6) -> bytes:
     """
     Gere a fila global. Se bater no 429, bloqueia toda a fila por até 2 minutos,
@@ -111,6 +122,16 @@ async def generate_image_with_queue(prompt: str, max_attempts=6) -> bytes:
         await asyncio.sleep(1) 
         
     raise Exception(f"Falha após {max_attempts} tentativas. Último erro: {last_err}")
+    
+    fixed_seed = sum(ord(c) for c in mon_name) + 100
+    async with _image_lock: # Um por vez
+        try:
+            return await generate_monster_image_safe(prompt, fixed_seed)
+        except Exception as e:
+            if "429" in str(e):
+                print("API Congestionada, aguardando...")
+                await asyncio.sleep(10)
+            raise e
 # ══════════════════════════════════════════════
 # CONFIGURAÇÕES DE SAVE (NOVO)
 # ══════════════════════════════════════════════
