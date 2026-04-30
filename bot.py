@@ -24,24 +24,21 @@ from typing import Optional
 POLLINATIONS_URL = "https://image.pollinations.ai/prompt/{prompt}"
 
 async def _lovable_generate_image_bytes(prompt: str) -> bytes:
-    """
-    Gera bytes PNG de uma imagem usando a Pollinations AI.
-    Totalmente gratuito, sem API key, sem limites de créditos.
-    Lança Exception com mensagem clara em caso de erro.
-    """
-    # Parâmetros fixos: 1024x1024, modelo flux (melhor qualidade), seed aleatório
+    """Gera a imagem. Reduzido para 512x512 e enhance=false para evitar rate-limits."""
     seed = random.randint(1, 999999)
     encoded_prompt = urllib.parse.quote(prompt)
+    
+    # Parâmetros otimizados (512x512, enhance=false)
     url = (
         f"https://image.pollinations.ai/prompt/{encoded_prompt}"
-        f"?width=1024&height=1024&model=flux&seed={seed}&nologo=true&enhance=true"
+        f"?width=512&height=512&model=flux&seed={seed}&nologo=true&enhance=false"
     )
 
     timeout = aiohttp.ClientTimeout(total=180, connect=20)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.get(url) as resp:
             if resp.status == 429:
-                raise Exception("Pollinations AI rate-limit (429) — tenta novamente daqui a uns segundos")
+                raise Exception("429 Too Many Requests")
             if resp.status != 200:
                 raise Exception(f"Pollinations AI HTTP {resp.status}")
             img_bytes = await resp.read()
@@ -49,6 +46,45 @@ async def _lovable_generate_image_bytes(prompt: str) -> bytes:
     if not img_bytes or len(img_bytes) < 1000:
         raise Exception("Imagem vazia/corrompida recebida da Pollinations AI")
     return img_bytes
+
+async def generate_image_with_queue(prompt: str, max_attempts=6) -> bytes:
+    """
+    Gere a fila global. Se bater no 429, bloqueia toda a fila por até 2 minutos,
+    impedindo que outros jogadores agravem o rate-limit.
+    """
+    global _next_allowed_api_call
+    last_err = None
+    
+    for attempt in range(max_attempts):
+        async with _image_generation_lock:
+            # 1. Verifica se temos de esperar por causa de um rate-limit anterior
+            now = time.time()
+            if now < _next_allowed_api_call:
+                await asyncio.sleep(_next_allowed_api_call - now)
+            
+            try:
+                # 2. Tenta gerar a imagem
+                img_bytes = await _lovable_generate_image_bytes(prompt)
+                
+                # 3. Sucesso! Define um delay mínimo (3s) antes do próximo pedido global
+                _next_allowed_api_call = time.time() + 3.0 
+                return img_bytes
+                
+            except Exception as e:
+                last_err = str(e)
+                if "429" in last_err:
+                    # 4. 429 atingido! Parar a fila global entre 20s e 120s
+                    wait_time = min(20 * (attempt + 1) + random.uniform(5.0, 15.0), 120.0)
+                    print(f"⚠️ [IMG Queue] 429 atingido. Fila parada por {wait_time:.0f}s (Tentativa {attempt+1}/{max_attempts})")
+                    _next_allowed_api_call = time.time() + wait_time
+                else:
+                    # Outro erro (ex: falha de ligação), espera apenas 5s
+                    _next_allowed_api_call = time.time() + 5.0
+        
+        # Pequena pausa fora do lock antes da próxima tentativa deste pedido para não encravar o bot
+        await asyncio.sleep(1) 
+        
+    raise Exception(f"Falha após {max_attempts} tentativas. Último erro: {last_err}")
 # ══════════════════════════════════════════════
 # CONFIGURAÇÕES DE SAVE (NOVO)
 # ══════════════════════════════════════════════
@@ -3086,6 +3122,7 @@ async def monster_image(interaction: discord.Interaction, nome: str):
         # 1) Tenta servir do cache de URLs Discord (permanente entre deploys)
         cached_url = get_cached_image_url(mon_name)
         if cached_url:
+            # ... (mantém o código do cache hit como estava)
             print(f"[IMG] {mon_name} → cache HIT (URL Discord)")
             desc_line = entry.get("desc", f"{entry.get('t','').capitalize()} • {entry.get('rare','')}")
             embed = discord.Embed(
@@ -3100,7 +3137,7 @@ async def monster_image(interaction: discord.Interaction, nome: str):
 
         # 2) Não está em cache → gera via Pollinations AI
         prompt = await gerar_prompt_imagem(entry)
-        print(f"[IMG] {mon_name} → cache MISS | tipo={entry.get('t')} | prompt={prompt[:120]}")
+        print(f"[IMG] {mon_name} → cache MISS | a entrar na fila de geração...")
 
         # Retry com backoff exponencial em caso de 429 da Pollinations AI
         img_bytes = None
@@ -3238,6 +3275,10 @@ async def _pregenerate_monster_images():
             try:
                 if get_cached_image_url(m["n"]):
                     continue  # já gerado entretanto
+                    
+                    prompt = await gerar_prompt_imagem(m)
+                img_data = await generate_image_with_queue(prompt, max_attempts=4)
+                
                 # Retry com backoff para lidar com 429 da Pollinations AI
                 img_data = None
                 for pregen_attempt in range(4):
@@ -3270,7 +3311,8 @@ async def _pregenerate_monster_images():
             await asyncio.sleep(5)
         print(f"[img-pregen] concluído ✅ geradas={done} falhas={fail} total={total}")
     except Exception as e:
-        print(f"[img-pregen] erro fatal: {e}")
+                fail += 1
+                print(f"[img-pregen] falha em {m.get('n','?')}: {e}")
 
 @tree.error
 async def on_error(interaction:discord.Interaction,error:app_commands.AppCommandError):
