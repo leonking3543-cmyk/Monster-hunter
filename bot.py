@@ -1857,9 +1857,23 @@ async def help_cmd(interaction:discord.Interaction):
 async def on_ready():
     print(f"Bot conectado: {bot.user} (ID: {bot.user.id})")
     try:
-        synced=await tree.sync(); print(f"Comandos sincronizados: {len(synced)}")
+        # Sync global — aparece para TODOS os utilizadores em todos os servidores
+        # (pode demorar até 1h do Discord propagar, mas funciona)
+        synced = await tree.sync()
+        print(f"Sync global: {len(synced)} comandos")
         for cmd in synced: print(f"  /{cmd.name}")
-    except Exception as e: print(f"Erro sync: {e}"); import traceback; traceback.print_exc()
+
+        # Sync imediato em cada guild onde o bot está (para testes instantâneos)
+        for guild in bot.guilds:
+            try:
+                tree.copy_global_to(guild=guild)
+                gs = await tree.sync(guild=guild)
+                print(f"  Guild {guild.name}: {len(gs)} cmds sincronizados")
+            except Exception as ge:
+                print(f"  Guild {guild.name} erro: {ge}")
+
+    except Exception as e:
+        print(f"Erro sync: {e}"); import traceback; traceback.print_exc()
     await bot.change_presence(activity=discord.Game(name="/ajuda | Monster Hunter RPG"))
 
 @tree.error
