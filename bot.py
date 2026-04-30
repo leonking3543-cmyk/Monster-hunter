@@ -2900,24 +2900,30 @@ async def gerar_prompt_imagem(mon):
 
     if name_visual:
         # Specific override: use it as the primary visual description
+        emoji_hint = f"visual motif inspired by {emoji}, " if emoji and emoji != "❓" else ""
         prompt = (
-            f"{name_visual}, "
+            f"creature called '{nome}': {name_visual}, "
+            f"{emoji_hint}"
             f"{rarity_mod}, "
-            f"fantasy RPG monster concept art, "
-            f"highly detailed digital painting, "
-            f"cinematic lighting, sharp focus, vibrant colors, "
-            f"professional creature design, best quality"
+            f"fantasy RPG monster concept art, signature distinctive design, "
+            f"highly detailed digital painting, character sheet style, "
+            f"cinematic lighting, sharp focus, vibrant saturated colors, "
+            f"professional creature design, ArtStation trending, best quality, 8k"
         )
     else:
-        # Fallback: combine tipo + nome phonetics
+        # Fallback: combine emoji + nome + tipo para algo único e não-genérico
         tipo_desc = type_base.get(tipo, f"{tipo} elemental fantasy creature")
+        emoji_hint = f"visually inspired by the emoji {emoji}, " if emoji and emoji != "❓" else ""
         prompt = (
-            f"{nome} creature, {tipo_desc}, "
+            f"unique original creature named '{nome}', "
+            f"{emoji_hint}"
+            f"{tipo_desc}, "
+            f"design elements and silhouette echoing the name '{nome}' and its phonetics, "
             f"{rarity_mod}, "
-            f"fantasy RPG monster concept art, "
-            f"highly detailed digital painting, "
-            f"cinematic lighting, sharp focus, vibrant colors, "
-            f"professional creature design, best quality"
+            f"fantasy RPG monster concept art, signature distinctive features, "
+            f"highly detailed digital painting, character sheet style, "
+            f"cinematic lighting, sharp focus, vibrant saturated colors, "
+            f"professional creature design, ArtStation trending, best quality, 8k"
         )
 
     if is_boss:
@@ -2978,9 +2984,7 @@ async def monster_image(interaction: discord.Interaction, nome: str):
     except Exception as e:
         print(f"[ERRO IMAGEM] {entry.get('n', nome)} → {type(e).__name__}: {str(e)}")
         await interaction.followup.send(
-            f"❌ Erro ao gerar imagem de **{entry.get('n', nome)}**.
-
-Erro: `{str(e)[:150]}`",
+            f"❌ Erro ao gerar imagem de **{entry.get('n', nome)}**.\n\nErro: `{str(e)[:150]}`",
             ephemeral=True
         )
 
