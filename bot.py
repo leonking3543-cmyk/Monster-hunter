@@ -26,50 +26,112 @@ POLLINATIONS_URL = "https://image.pollinations.ai/prompt/{prompt}"
 _image_lock = asyncio.Lock()
 _next_api_call = 0.0
 
-async def generate_image_with_queue(prompt: str, max_attempts: int = 5) -> bytes:
+async def generate_monster_image_safe(mon_name: str, prompt: str) -> bytes:
     """
-    Gera uma imagem via Pollinations AI com fila global (um pedido de cada vez)
-    e backoff exponencial em caso de rate-limit (429).
+    Garante que apenas uma imagem é gerada por vez, com seed fixa
+    e respeitando o rate-limit da Pollinations.
     """
     global _next_api_call
-    last_err = None
+    
+    # Criamos um número (seed) único baseado no nome do monstro
+    # Isso garante que o monstro tenha sempre a mesma aparência no catálogo
+    fixed_seed = sum(ord(c) for c in mon_name) + 100
+    
+    encoded_prompt = urllib.parse.quote(prompt)
+    url = (
+        f"https://image.pollinations.ai/prompt/{encoded_prompt}"
+        f"?width=512&height=512&model=flux&seed={seed}&nologo=true&enhance=false"
+    )
 
-    async with _image_lock:
-        for attempt in range(max_attempts):
-            # Espera se ainda estiver em cooldown de um 429 anterior
+    timeout = aiohttp.ClientTimeout(total=180, connect=20)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.get(url) as resp:
+            if resp.status == 429:
+                raise Exception("429") # Rate limit
+            if resp.status != 200:
+                raise Exception(f"Erro HTTP {resp.status}")
+            return await resp.read()
+            
+    async with _image_lock: # FILA: Só entra um de cada vez aqui
+        for attempt in range(5):
+            # Espera se o rate-limit global ainda estiver ativo
             now = time.time()
             if now < _next_api_call:
                 await asyncio.sleep(_next_api_call - now)
 
             try:
-                encoded_prompt = urllib.parse.quote(prompt)
-                url = (
-                    f"https://image.pollinations.ai/prompt/{encoded_prompt}"
-                    f"?width=512&height=512&model=flux&nologo=true&enhance=false"
-                )
-                timeout = aiohttp.ClientTimeout(total=180, connect=20)
+                timeout = aiohttp.ClientTimeout(total=60)
                 async with aiohttp.ClientSession(timeout=timeout) as session:
                     async with session.get(url) as resp:
                         if resp.status == 429:
+                            # ERRO 429: API cansada. Espera entre 30s a 2min.
                             wait_time = min(30 * (attempt + 1), 120)
-                            print(f"⚠️ [IMG] 429 — pausa de {wait_time}s (tentativa {attempt+1}/{max_attempts})")
+                            print(f"⚠️ Rate-limit no catálogo! Pausando fila por {wait_time}s...")
                             _next_api_call = time.time() + wait_time
                             continue
-                        if resp.status != 200:
-                            raise Exception(f"Erro HTTP {resp.status}")
-                        data = await resp.read()
-                        if len(data) > 1000:
-                            _next_api_call = time.time() + 5.0  # pausa mínima entre pedidos
-                            return data
-                        raise Exception("Resposta vazia da API")
+                        
+                        if resp.status == 200:
+                            data = await resp.read()
+                            if len(data) > 1000:
+                                # Sucesso! Pequena pausa de 5s para a próxima imagem
+                                _next_api_call = time.time() + 5.0 
+                                return data
+                
+            except Exception as e:
+                print(f"Erro na tentativa {attempt}: {e}")
+                await asyncio.sleep(5)
 
+    raise Exception("Não foi possível gerar a imagem após várias tentativas.")
+    
+    _image_lock = asyncio.Lock()
+async def generate_image_with_queue(prompt: str, max_attempts=6) -> bytes:
+    """
+    Gere a fila global. Se bater no 429, bloqueia toda a fila por até 2 minutos,
+    impedindo que outros jogadores agravem o rate-limit.
+    """
+    global _next_allowed_api_call
+    last_err = None
+    
+    for attempt in range(max_attempts):
+        async with _image_generation_lock:
+            # 1. Verifica se temos de esperar por causa de um rate-limit anterior
+            now = time.time()
+            if now < _next_allowed_api_call:
+                await asyncio.sleep(_next_allowed_api_call - now)
+            
+            try:
+                # 2. Tenta gerar a imagem
+                img_bytes = await generate_image_with_queue(prompt)
+                
+                # 3. Sucesso! Define um delay mínimo (3s) antes do próximo pedido global
+                _next_allowed_api_call = time.time() + 3.0 
+                return img_bytes
+                
             except Exception as e:
                 last_err = str(e)
-                print(f"[IMG] Tentativa {attempt+1} falhou: {last_err}")
-                if attempt < max_attempts - 1:
-                    await asyncio.sleep(5)
-
+                if "429" in last_err:
+                    # 4. 429 atingido! Parar a fila global entre 20s e 120s
+                    wait_time = min(20 * (attempt + 1) + random.uniform(5.0, 15.0), 120.0)
+                    print(f"⚠️ [IMG Queue] 429 atingido. Fila parada por {wait_time:.0f}s (Tentativa {attempt+1}/{max_attempts})")
+                    _next_allowed_api_call = time.time() + wait_time
+                else:
+                    # Outro erro (ex: falha de ligação), espera apenas 5s
+                    _next_allowed_api_call = time.time() + 5.0
+        
+        # Pequena pausa fora do lock antes da próxima tentativa deste pedido para não encravar o bot
+        await asyncio.sleep(1) 
+        
     raise Exception(f"Falha após {max_attempts} tentativas. Último erro: {last_err}")
+    
+    fixed_seed = sum(ord(c) for c in mon_name) + 100
+    async with _image_lock: # Um por vez
+        try:
+            return await generate_monster_image_safe(prompt, fixed_seed)
+        except Exception as e:
+            if "429" in str(e):
+                print("API Congestionada, aguardando...")
+                await asyncio.sleep(10)
+            raise e
 # ══════════════════════════════════════════════
 # CONFIGURAÇÕES DE SAVE (NOVO)
 # ══════════════════════════════════════════════
@@ -815,7 +877,7 @@ BOSS_DESCRIPTIONS = {
     "Rainha das Fadas":      "🧚 Fada | Protetora dos reinos encantados desde o início dos tempos.",
     "Void King":             "👑 Cristal | Rei do vazio — existência além da compreensão mortal.",
     "Nico":                  "🐈 Fofa | A destruidora de mundos. Aparência enganosa. Ronronas antes de devastar.",
-    "murilo":                "👨‍🦽 viado | O inominável do caos. Não faça perguntas sobre ele.",
+    "murilo":                "👨‍🦽 ??? | O inominável do caos. Não faça perguntas sobre ele.",
     "???":                   "❓ ??? | Entidade desconhecida — nem o universo sabe o que é isso.",
 }
 
@@ -1116,7 +1178,7 @@ TYPE_EMOJIS={
     "sombra":"🌑","cristal":"💎","veneno":"☠️","som":"🎵","tempo":"⌛","luz":"☀️","cosmos":"🌌",
     "metal":"⚙️","fantasma":"👻","dragão":"🐉","fada":"🧚","psíquico":"🔮","luta":"👊",
     "inseto":"🐛","néon":"🟢","nuclear":"☢️","espírito":"🙏","mecânico":"🤖","ventos":"🌪️",
-    "magma":"🌋","arcano":"🪄","boss":"⚔️","fofa":"🐈","viado":"👨‍🦽","???":"❓","Deus":"🌟",
+    "magma":"🌋","arcano":"🪄","boss":"⚔️","fofa":"🐈","molestador":"👨‍🦽","???":"❓","Deus":"🌟",
 }
 def type_badge(t): return f"{TYPE_EMOJIS.get(t,'❓')} `{t.upper()}`"
 def rare_badge(r): return f"{RARE_EMOJI.get(r,'❓')} `{r.upper()}`"
@@ -1273,6 +1335,14 @@ def store_cached_image_url(name: str, url: str) -> None:
     _save_image_url_cache()
     print(f"[img-cache] URL guardado para '{name}': {url[:60]}…")
 
+def delete_cached_image_url(name: str) -> None:
+    """Remove a imagem do cache para forçar nova geração."""
+    key = _img_cache_key(name)
+    if key in _image_url_memory:
+        del _image_url_memory[key]
+        _save_image_url_cache()
+        print(f"[img-cache] Cache apagado para '{name}'")
+
 async def upload_image_to_discord_cache(bot_ref, img_bytes: bytes, filename: str) -> str | None:
     """
     Faz upload dos bytes de imagem para o canal de cache do Discord.
@@ -1306,7 +1376,7 @@ def save_cached_monster_image(name: str, img_bytes: bytes) -> bool:
 async def _fetch_monster_image_bytes(entry):
     """Gera (via Pollinations AI) os bytes da imagem de um monstro. Não usa cache."""
     prompt = await gerar_prompt_imagem(entry)
-    return await generate_image_with_queue(prompt)
+    return await generate_monster_image_safe(prompt)
 
 # Carrega URLs ao iniciar
 _load_image_url_cache()
@@ -3087,6 +3157,125 @@ async def gerar_prompt_imagem(mon):
     return prompt
 
 
+class RefazerImagemView(discord.ui.View):
+    """Botão 🔄 Refazer que apaga o cache e gera uma nova imagem."""
+    def __init__(self, entry: dict):
+        super().__init__(timeout=120)
+        self.entry = entry
+
+    @discord.ui.button(label="🔄 Refazer imagem", style=discord.ButtonStyle.secondary)
+    async def refazer(self, interaction: discord.Interaction, button: discord.ui.Button):
+        mon_name = self.entry["n"]
+        button.disabled = True
+        button.label = "⏳ A gerar..."
+        await interaction.response.edit_message(view=self)
+        try:
+            delete_cached_image_url(mon_name)
+            prompt = await gerar_prompt_imagem(self.entry)
+            print(f"[IMG] {mon_name} → REFAZER por {interaction.user}")
+            img_bytes = None
+            last_err = None
+            for attempt in range(5):
+                try:
+                    img_bytes = await generate_image_with_queue(prompt)
+                    break
+                except Exception as e:
+                    last_err = str(e)
+                    if "429" in last_err and attempt < 4:
+                        await asyncio.sleep(min(2 ** attempt + random.uniform(0.5, 2.0), 30.0))
+                        continue
+                    raise
+            if img_bytes is None:
+                raise Exception(f"Pollinations AI indisponível ({last_err})")
+            safe_filename = f"{_img_cache_key(mon_name)}.png"
+            discord_url = await upload_image_to_discord_cache(bot, img_bytes, safe_filename)
+            desc_line = self.entry.get("desc", f"{self.entry.get('t','').capitalize()} • {self.entry.get('rare','')}")
+            embed = discord.Embed(
+                title=f"{self.entry.get('e','❓')} {mon_name}",
+                description=desc_line,
+                color=RARE_COLOR.get(self.entry.get("rare"), 0x888888)
+            )
+            new_view = RefazerImagemView(self.entry)
+            if discord_url:
+                store_cached_image_url(mon_name, discord_url)
+                embed.set_image(url=discord_url)
+                embed.set_footer(text="🎨 Gerado com Pollinations AI (flux) • guardado no cache")
+                await interaction.edit_original_response(embed=embed, view=new_view)
+            else:
+                file = discord.File(io.BytesIO(img_bytes), filename="monster.png")
+                embed.set_image(url="attachment://monster.png")
+                embed.set_footer(text="🎨 Gerado com Pollinations AI (flux)")
+                await interaction.edit_original_response(embed=embed, attachments=[file], view=new_view)
+        except Exception as e:
+            button.disabled = False
+            button.label = "🔄 Refazer imagem"
+            await interaction.edit_original_response(
+                content=f"❌ Erro ao refazer: `{str(e)[:150]}`", view=self
+            )
+
+
+async def _gerar_e_enviar_imagem(interaction: discord.Interaction, entry: dict, followup: bool = True):
+    """Lógica partilhada de gerar imagem e enviar embed com botão Refazer."""
+    mon_name = entry["n"]
+
+    cached_url = get_cached_image_url(mon_name)
+    if cached_url:
+        print(f"[IMG] {mon_name} → cache HIT")
+        desc_line = entry.get("desc", f"{entry.get('t','').capitalize()} • {entry.get('rare','')}")
+        embed = discord.Embed(
+            title=f"{entry.get('e','❓')} {mon_name}",
+            description=desc_line,
+            color=RARE_COLOR.get(entry.get("rare"), 0x888888)
+        )
+        embed.set_image(url=cached_url)
+        embed.set_footer(text="🎨 Imagem guardada (cache Discord)")
+        await interaction.followup.send(embed=embed, view=RefazerImagemView(entry))
+        return
+
+    prompt = await gerar_prompt_imagem(entry)
+    print(f"[IMG] {mon_name} → cache MISS | a gerar...")
+
+    img_bytes = None
+    last_err = None
+    MAX_ATTEMPTS = 5
+    for attempt in range(MAX_ATTEMPTS):
+        try:
+            img_bytes = await generate_image_with_queue(prompt)
+            break
+        except Exception as e:
+            last_err = str(e)
+            if "429" in last_err and attempt < MAX_ATTEMPTS - 1:
+                wait = min(2 ** attempt + random.uniform(0.5, 2.0), 30.0)
+                print(f"[IMG] 429, retry {attempt+1}/{MAX_ATTEMPTS} em {wait:.1f}s")
+                await asyncio.sleep(wait)
+                continue
+            raise
+
+    if img_bytes is None:
+        raise Exception(f"Pollinations AI indisponível após {MAX_ATTEMPTS} tentativas ({last_err})")
+
+    safe_filename = f"{_img_cache_key(mon_name)}.png"
+    discord_url = await upload_image_to_discord_cache(bot, img_bytes, safe_filename)
+
+    desc_line = entry.get("desc", f"{entry.get('t','').capitalize()} • {entry.get('rare','')}")
+    embed = discord.Embed(
+        title=f"{entry.get('e','❓')} {mon_name}",
+        description=desc_line,
+        color=RARE_COLOR.get(entry.get("rare"), 0x888888)
+    )
+    view = RefazerImagemView(entry)
+    if discord_url:
+        store_cached_image_url(mon_name, discord_url)
+        embed.set_image(url=discord_url)
+        embed.set_footer(text="🎨 Gerado com Pollinations AI (flux) • guardado no cache")
+        await interaction.followup.send(embed=embed, view=view)
+    else:
+        file = discord.File(io.BytesIO(img_bytes), filename="monster.png")
+        embed.set_image(url="attachment://monster.png")
+        embed.set_footer(text="🎨 Gerado com Pollinations AI (flux) — configura IMAGE_CACHE_CHANNEL para cache permanente")
+        await interaction.followup.send(embed=embed, file=file, view=view)
+
+
 @tree.command(name="imagem", description="Gera uma imagem artística de um monster")
 @app_commands.describe(nome="Nome do monster")
 async def monster_image(interaction: discord.Interaction, nome: str):
@@ -3106,72 +3295,7 @@ async def monster_image(interaction: discord.Interaction, nome: str):
         await interaction.followup.send(f"❌ Monster **{nome}** não encontrado!", ephemeral=True)
         return
     try:
-        mon_name = entry["n"]
-
-        # 1) Tenta servir do cache de URLs Discord (permanente entre deploys)
-        cached_url = get_cached_image_url(mon_name)
-        if cached_url:
-            # ... (mantém o código do cache hit como estava)
-            print(f"[IMG] {mon_name} → cache HIT (URL Discord)")
-            desc_line = entry.get("desc", f"{entry.get('t','').capitalize()} • {entry.get('rare','')}")
-            embed = discord.Embed(
-                title=f"{entry.get('e','❓')} {mon_name}",
-                description=desc_line,
-                color=RARE_COLOR.get(entry.get("rare"), 0x888888)
-            )
-            embed.set_image(url=cached_url)
-            embed.set_footer(text="🎨 Imagem guardada (cache Discord)")
-            await interaction.followup.send(embed=embed)
-            return
-
-        # 2) Não está em cache → gera via Pollinations AI
-        prompt = await gerar_prompt_imagem(entry)
-        print(f"[IMG] {mon_name} → cache MISS | a entrar na fila de geração...")
-
-        # Retry com backoff exponencial em caso de 429 da Pollinations AI
-        img_bytes = None
-        last_err = None
-        MAX_ATTEMPTS = 5
-        for attempt in range(MAX_ATTEMPTS):
-            try:
-                img_bytes = await generate_image_with_queue(prompt)
-                break
-            except Exception as e:
-                last_err = str(e)
-                if "429" in last_err and attempt < MAX_ATTEMPTS - 1:
-                    wait = min(2 ** attempt + random.uniform(0.5, 2.0), 30.0)
-                    print(f"[IMG] Pollinations 429, retry {attempt+1}/{MAX_ATTEMPTS} em {wait:.1f}s")
-                    await asyncio.sleep(wait)
-                    continue
-                raise
-
-        if img_bytes is None:
-            raise Exception(f"Pollinations AI indisponível após {MAX_ATTEMPTS} tentativas ({last_err})")
-
-        # 3) Faz upload para canal Discord e guarda URL permanente
-        safe_filename = f"{_img_cache_key(mon_name)}.png"
-        discord_url = await upload_image_to_discord_cache(bot, img_bytes, safe_filename)
-
-        desc_line = entry.get("desc", f"{entry.get('t','').capitalize()} • {entry.get('rare','')}")
-        embed = discord.Embed(
-            title=f"{entry.get('e','❓')} {mon_name}",
-            description=desc_line,
-            color=RARE_COLOR.get(entry.get("rare"), 0x888888)
-        )
-
-        if discord_url:
-            # Guardou no Discord → usa URL permanente
-            store_cached_image_url(mon_name, discord_url)
-            embed.set_image(url=discord_url)
-            embed.set_footer(text="🎨 Gerado com Pollinations AI (flux) • guardado no cache")
-            await interaction.followup.send(embed=embed)
-        else:
-            # Canal não configurado → envia os bytes directamente (sem cache permanente)
-            file = discord.File(io.BytesIO(img_bytes), filename="monster.png")
-            embed.set_image(url="attachment://monster.png")
-            embed.set_footer(text="🎨 Gerado com Pollinations AI (flux) — configura IMAGE_CACHE_CHANNEL para cache permanente")
-            await interaction.followup.send(embed=embed, file=file)
-
+        await _gerar_e_enviar_imagem(interaction, entry)
     except Exception as e:
         print(f"[ERRO IMAGEM] {entry.get('n', nome)} → {type(e).__name__}: {str(e)}")
         await interaction.followup.send(
