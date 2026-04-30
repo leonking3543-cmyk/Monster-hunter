@@ -21,30 +21,25 @@ from typing import Optional
 # ══════════════════════════════════════════════
 # POLLINATIONS AI — Geração de imagem (100% gratuito, sem API key)
 # ══════════════════════════════════════════════
-POLLINATIONS_URL = "https://image.pollinations.ai/prompt/{prompt}"
-
 _image_lock = asyncio.Lock()
 _next_api_call = 0.0
 
-async def generate_monster_image_safe(mon_name: str, prompt: str) -> bytes:
-    """
-    Garante que apenas uma imagem é gerada por vez, com seed fixa
-    e respeitando o rate-limit da Pollinations.
-    """
+async def generate_image_with_queue(prompt: str, max_attempts: int = 5) -> bytes:
     global _next_api_call
-    
-    # Criamos um número (seed) único baseado no nome do monstro
-    # Isso garante que o monstro tenha sempre a mesma aparência no catálogo
-    fixed_seed = sum(ord(c) for c in mon_name) + 100
-    
-    encoded_prompt = urllib.parse.quote(prompt)
-    url = (
-        f"https://image.pollinations.ai/prompt/{encoded_prompt}"
-        f"?width=512&height=512&model=flux&seed={seed}&nologo=true&enhance=false"
-    )
-
-    timeout = aiohttp.ClientTimeout(total=180, connect=20)
-   async with aiohttp.ClientSession(timeout=timeout) as session:
+    last_err = None
+    async with _image_lock:
+        for attempt in range(max_attempts):
+            now = time.time()
+            if now < _next_api_call:
+                await asyncio.sleep(_next_api_call - now)
+            try:
+                encoded_prompt = urllib.parse.quote(prompt)
+                url = (
+                    f"https://image.pollinations.ai/prompt/{encoded_prompt}"
+                    f"?width=512&height=512&model=flux&nologo=true&enhance=false"
+                )
+                timeout = aiohttp.ClientTimeout(total=180, connect=20)
+                async with aiohttp.ClientSession(timeout=timeout) as session:
                     async with session.get(url) as resp:
                         if resp.status == 429:
                             wait_time = min(30 * (attempt + 1), 120)
@@ -64,64 +59,6 @@ async def generate_monster_image_safe(mon_name: str, prompt: str) -> bytes:
                 if attempt < max_attempts - 1:
                     await asyncio.sleep(5)
     raise Exception(f"Falha após {max_attempts} tentativas. Último erro: {last_err}")
-            return await resp.read()
-            
-    async with _image_lock: # FILA: Só entra um de cada vez aqui
-        for attempt in range(5):
-            # Espera se o rate-limit global ainda estiver ativo
-            now = time.time()
-            if now < _next_api_call:
-                await asyncio.sleep(_next_api_call - now)
-
-            try:
-                timeout = aiohttp.ClientTimeout(total=60)
-                async with aiohttp.ClientSession(timeout=timeout) as session:
-                    async with session.get(url) as resp:
-                        if resp.status == 429:
-                            # ERRO 429: API cansada. Espera entre 30s a 2min.
-                            wait_time = min(30 * (attempt + 1), 120)
-                            print(f"⚠️ Rate-limit no catálogo! Pausando fila por {wait_time}s...")
-                            _next_api_call = time.time() + wait_time
-                            continue
-                        
-                        if resp.status == 200:
-                            data = await resp.read()
-                            if len(data) > 1000:
-                                # Sucesso! Pequena pausa de 5s para a próxima imagem
-                                _next_api_call = time.time() + 5.0 
-                                return data
-                
-            except Exception as e:
-                print(f"Erro na tentativa {attempt}: {e}")
-                await asyncio.sleep(5)
-
-    raise Exception("Não foi possível gerar a imagem após várias tentativas.")
-    
-    _image_lock = asyncio.Lock()
-async def generate_image_with_queue(prompt: str, max_attempts: int = 5) -> bytes:
-    global _next_api_call
-    last_err = None
-    async with _image_lock:
-        for attempt in range(max_attempts):
-            now = time.time()
-            if now < _next_api_call:
-                await asyncio.sleep(_next_api_call - now)
-            try:
-                encoded_prompt = urllib.parse.quote(prompt)
-                url = (
-                    f"https://image.pollinations.ai/prompt/{encoded_prompt}"
-                    f"?width=512&height=512&model=flux&nologo=true&enhance=false"
-                )
-    
-    fixed_seed = sum(ord(c) for c in mon_name) + 100
-    async with _image_lock: # Um por vez
-        try:
-            return await generate_monster_image_safe(prompt, fixed_seed)
-        except Exception as e:
-            if "429" in str(e):
-                print("API Congestionada, aguardando...")
-                await asyncio.sleep(10)
-            raise e
 # ══════════════════════════════════════════════
 # CONFIGURAÇÕES DE SAVE (NOVO)
 # ══════════════════════════════════════════════
@@ -1366,7 +1303,7 @@ def save_cached_monster_image(name: str, img_bytes: bytes) -> bool:
 async def _fetch_monster_image_bytes(entry):
     """Gera (via Pollinations AI) os bytes da imagem de um monstro. Não usa cache."""
     prompt = await gerar_prompt_imagem(entry)
-    return await generate_monster_image_safe(prompt)
+    return await generate_image_with_queue(prompt)
 
 # Carrega URLs ao iniciar
 _load_image_url_cache()
