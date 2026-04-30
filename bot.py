@@ -90,7 +90,7 @@ async def generate_image_with_queue(prompt: str, max_attempts=6) -> bytes:
             
             try:
                 # 2. Tenta gerar a imagem
-                img_bytes = await generate_monster_image_safe(prompt)
+                img_bytes = await generate_image_with_queue(prompt)
                 
                 # 3. Sucesso! Define um delay mínimo (3s) antes do próximo pedido global
                 _next_allowed_api_call = time.time() + 3.0 
@@ -3171,7 +3171,7 @@ async def monster_image(interaction: discord.Interaction, nome: str):
         MAX_ATTEMPTS = 5
         for attempt in range(MAX_ATTEMPTS):
             try:
-                img_bytes = await generate_monster_image_safe(mon_name, prompt)
+                img_bytes = await generate_image_with_queue(mon_name, prompt)
                 break
             except Exception as e:
                 last_err = str(e)
