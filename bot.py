@@ -44,12 +44,26 @@ async def generate_monster_image_safe(mon_name: str, prompt: str) -> bytes:
     )
 
     timeout = aiohttp.ClientTimeout(total=180, connect=20)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.get(url) as resp:
-            if resp.status == 429:
-                raise Exception("429") # Rate limit
-            if resp.status != 200:
-                raise Exception(f"Erro HTTP {resp.status}")
+   async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.get(url) as resp:
+                        if resp.status == 429:
+                            wait_time = min(30 * (attempt + 1), 120)
+                            print(f"⚠️ [IMG] 429 — pausa de {wait_time}s (tentativa {attempt+1}/{max_attempts})")
+                            _next_api_call = time.time() + wait_time
+                            continue
+                        if resp.status != 200:
+                            raise Exception(f"Erro HTTP {resp.status}")
+                        data = await resp.read()
+                        if len(data) > 1000:
+                            _next_api_call = time.time() + 5.0
+                            return data
+                        raise Exception("Resposta vazia da API")
+            except Exception as e:
+                last_err = str(e)
+                print(f"[IMG] Tentativa {attempt+1} falhou: {last_err}")
+                if attempt < max_attempts - 1:
+                    await asyncio.sleep(5)
+    raise Exception(f"Falha após {max_attempts} tentativas. Último erro: {last_err}")
             return await resp.read()
             
     async with _image_lock: # FILA: Só entra um de cada vez aqui
@@ -84,44 +98,20 @@ async def generate_monster_image_safe(mon_name: str, prompt: str) -> bytes:
     raise Exception("Não foi possível gerar a imagem após várias tentativas.")
     
     _image_lock = asyncio.Lock()
-async def generate_image_with_queue(prompt: str, max_attempts=6) -> bytes:
-    """
-    Gere a fila global. Se bater no 429, bloqueia toda a fila por até 2 minutos,
-    impedindo que outros jogadores agravem o rate-limit.
-    """
-    global _next_allowed_api_call
+async def generate_image_with_queue(prompt: str, max_attempts: int = 5) -> bytes:
+    global _next_api_call
     last_err = None
-    
-    for attempt in range(max_attempts):
-        async with _image_generation_lock:
-            # 1. Verifica se temos de esperar por causa de um rate-limit anterior
+    async with _image_lock:
+        for attempt in range(max_attempts):
             now = time.time()
-            if now < _next_allowed_api_call:
-                await asyncio.sleep(_next_allowed_api_call - now)
-            
+            if now < _next_api_call:
+                await asyncio.sleep(_next_api_call - now)
             try:
-                # 2. Tenta gerar a imagem
-                img_bytes = await generate_image_with_queue(prompt)
-                
-                # 3. Sucesso! Define um delay mínimo (3s) antes do próximo pedido global
-                _next_allowed_api_call = time.time() + 3.0 
-                return img_bytes
-                
-            except Exception as e:
-                last_err = str(e)
-                if "429" in last_err:
-                    # 4. 429 atingido! Parar a fila global entre 20s e 120s
-                    wait_time = min(20 * (attempt + 1) + random.uniform(5.0, 15.0), 120.0)
-                    print(f"⚠️ [IMG Queue] 429 atingido. Fila parada por {wait_time:.0f}s (Tentativa {attempt+1}/{max_attempts})")
-                    _next_allowed_api_call = time.time() + wait_time
-                else:
-                    # Outro erro (ex: falha de ligação), espera apenas 5s
-                    _next_allowed_api_call = time.time() + 5.0
-        
-        # Pequena pausa fora do lock antes da próxima tentativa deste pedido para não encravar o bot
-        await asyncio.sleep(1) 
-        
-    raise Exception(f"Falha após {max_attempts} tentativas. Último erro: {last_err}")
+                encoded_prompt = urllib.parse.quote(prompt)
+                url = (
+                    f"https://image.pollinations.ai/prompt/{encoded_prompt}"
+                    f"?width=512&height=512&model=flux&nologo=true&enhance=false"
+                )
     
     fixed_seed = sum(ord(c) for c in mon_name) + 100
     async with _image_lock: # Um por vez
