@@ -1192,51 +1192,103 @@ os.makedirs(SAVE_DIR, exist_ok=True)
 def save_path(uid): return os.path.join(SAVE_DIR,f"{uid}.json")
 
 # ============================================================
-# CACHE DE IMAGENS DE MONSTROS
-# Quando alguém gera a imagem de um monstro pela primeira vez,
-# fica guardada em disco. Próximas chamadas reutilizam a mesma.
+# CACHE DE IMAGENS — Discord como storage permanente
+#
+# Fluxo:
+#   1. Verifica cache em memória (URL Discord)  → devolve URL
+#   2. Verifica ficheiro JSON local (sobrevive restart dentro do Railway)
+#   3. Gera imagem via Pollinations AI
+#   4. Faz upload para canal Discord privado → guarda URL permanente
+#
+# Configuração (variáveis de ambiente no Railway):
+#   IMAGE_CACHE_CHANNEL  — ID do canal Discord onde as imagens ficam guardadas
+#                          (ex: "123456789012345678")
+#                          Deixa em branco para usar apenas cache local/memória.
 # ============================================================
-IMAGE_CACHE_DIR = os.path.join(SAVE_DIR, "monster_images")
-os.makedirs(IMAGE_CACHE_DIR, exist_ok=True)
-print(f"[img-cache] usando diretório: {IMAGE_CACHE_DIR}")
+
+IMAGE_CACHE_CHANNEL_ID = int(os.environ.get("IMAGE_CACHE_CHANNEL", "0") or "0")
+IMAGE_URL_CACHE_FILE   = os.path.join(SAVE_DIR, "monster_image_urls.json")
+
+# Cache em memória: nome_normalizado → URL Discord (string)
+_image_url_memory: dict[str, str] = {}
 
 def _img_cache_key(name: str) -> str:
-    """Normaliza o nome do monstro para um nome de ficheiro seguro."""
+    """Normaliza o nome do monstro para chave de cache."""
     import re as _re
     safe = _re.sub(r"[^a-zA-Z0-9_-]+", "_", (name or "").strip().lower())
     return safe or "unknown"
 
+def _load_image_url_cache() -> None:
+    """Carrega o JSON de URLs do disco para memória (chamado no arranque)."""
+    global _image_url_memory
+    try:
+        if os.path.exists(IMAGE_URL_CACHE_FILE):
+            with open(IMAGE_URL_CACHE_FILE, "r", encoding="utf-8") as f:
+                _image_url_memory = json.load(f)
+            print(f"[img-cache] {len(_image_url_memory)} URLs carregados do disco")
+        else:
+            _image_url_memory = {}
+            print("[img-cache] sem cache de URLs existente, a começar do zero")
+    except Exception as e:
+        print(f"[img-cache] erro ao carregar URLs: {e}")
+        _image_url_memory = {}
+
+def _save_image_url_cache() -> None:
+    """Persiste o dicionário de URLs em disco."""
+    try:
+        with open(IMAGE_URL_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(_image_url_memory, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[img-cache] erro ao guardar URLs: {e}")
+
+def get_cached_image_url(name: str) -> str | None:
+    """Devolve o URL Discord da imagem em cache, ou None se não existir."""
+    return _image_url_memory.get(_img_cache_key(name))
+
+def store_cached_image_url(name: str, url: str) -> None:
+    """Guarda o URL Discord em memória e persiste em disco."""
+    key = _img_cache_key(name)
+    _image_url_memory[key] = url
+    _save_image_url_cache()
+    print(f"[img-cache] URL guardado para '{name}': {url[:60]}…")
+
+async def upload_image_to_discord_cache(bot_ref, img_bytes: bytes, filename: str) -> str | None:
+    """
+    Faz upload dos bytes de imagem para o canal de cache do Discord.
+    Devolve o URL permanente do attachment, ou None se não configurado/falhar.
+    """
+    if not IMAGE_CACHE_CHANNEL_ID:
+        return None
+    try:
+        channel = bot_ref.get_channel(IMAGE_CACHE_CHANNEL_ID)
+        if channel is None:
+            channel = await bot_ref.fetch_channel(IMAGE_CACHE_CHANNEL_ID)
+        file = discord.File(io.BytesIO(img_bytes), filename=filename)
+        msg  = await channel.send(file=file)
+        if msg.attachments:
+            return msg.attachments[0].url
+        return None
+    except Exception as e:
+        print(f"[img-cache] erro ao fazer upload para Discord: {e}")
+        return None
+
+# Retrocompatibilidade — funções antigas usadas na pré-geração
 def get_cached_monster_image(name: str):
-    """Devolve os bytes da imagem em cache, ou None se não existir."""
-    path = os.path.join(IMAGE_CACHE_DIR, f"{_img_cache_key(name)}.png")
-    if os.path.exists(path):
-        try:
-            with open(path, "rb") as f:
-                data = f.read()
-            if len(data) >= 1000:
-                return data
-        except Exception as e:
-            print(f"[img-cache] erro a ler {path}: {e}")
-    return None
+    """Para retrocompatibilidade: devolve True se há URL em cache, None caso contrário."""
+    return get_cached_image_url(name)  # truthy se existe URL
 
 def save_cached_monster_image(name: str, img_bytes: bytes) -> bool:
-    """Guarda a imagem do monstro em disco para reutilização futura."""
-    if not img_bytes or len(img_bytes) < 1000:
-        return False
-    path = os.path.join(IMAGE_CACHE_DIR, f"{_img_cache_key(name)}.png")
-    try:
-        with open(path, "wb") as f:
-            f.write(img_bytes)
-        print(f"[img-cache] guardada: {path} ({len(img_bytes)} bytes)")
-        return True
-    except Exception as e:
-        print(f"[img-cache] erro a guardar {path}: {e}")
-        return False
+    """Retrocompatibilidade: o upload real é feito em save_monster_image_discord."""
+    # Nada a fazer aqui — o upload acontece no comando /imagem
+    return True
 
 async def _fetch_monster_image_bytes(entry):
-    """Gera (via Lovable AI / Nano Banana) os bytes da imagem de um monstro. Não usa cache."""
+    """Gera (via Pollinations AI) os bytes da imagem de um monstro. Não usa cache."""
     prompt = await gerar_prompt_imagem(entry)
     return await _lovable_generate_image_bytes(prompt)
+
+# Carrega URLs ao iniciar
+_load_image_url_cache()
 
 def default_save():
     return {
@@ -3031,49 +3083,48 @@ async def monster_image(interaction: discord.Interaction, nome: str):
     try:
         mon_name = entry["n"]
 
-        # 1) Tenta servir do cache primeiro
-        cached = get_cached_monster_image(mon_name)
-        if cached:
-            print(f"[IMG] {mon_name} → cache HIT ({len(cached)} bytes)")
-            file = discord.File(io.BytesIO(cached), filename="monster.png")
+        # 1) Tenta servir do cache de URLs Discord (permanente entre deploys)
+        cached_url = get_cached_image_url(mon_name)
+        if cached_url:
+            print(f"[IMG] {mon_name} → cache HIT (URL Discord)")
             desc_line = entry.get("desc", f"{entry.get('t','').capitalize()} • {entry.get('rare','')}")
             embed = discord.Embed(
                 title=f"{entry.get('e','❓')} {mon_name}",
                 description=desc_line,
                 color=RARE_COLOR.get(entry.get("rare"), 0x888888)
             )
-            embed.set_image(url="attachment://monster.png")
-            embed.set_footer(text="🎨 Imagem guardada (cache)")
-            await interaction.followup.send(embed=embed, file=file)
+            embed.set_image(url=cached_url)
+            embed.set_footer(text="🎨 Imagem guardada (cache Discord)")
+            await interaction.followup.send(embed=embed)
             return
 
-        # 2) Não está em cache → gera via Lovable AI Gateway (Nano Banana)
+        # 2) Não está em cache → gera via Pollinations AI
         prompt = await gerar_prompt_imagem(entry)
         print(f"[IMG] {mon_name} → cache MISS | tipo={entry.get('t')} | prompt={prompt[:120]}")
 
-        # Pequena retry com backoff em caso de 429 do gateway
+        # Retry com backoff exponencial em caso de 429 da Pollinations AI
         img_bytes = None
         last_err = None
-        for attempt in range(3):
+        MAX_ATTEMPTS = 5
+        for attempt in range(MAX_ATTEMPTS):
             try:
                 img_bytes = await _lovable_generate_image_bytes(prompt)
                 break
             except Exception as e:
                 last_err = str(e)
-                if "429" in last_err and attempt < 2:
-                    wait = 2 ** attempt + random.random()
-                    print(f"[IMG] Lovable AI 429, retry {attempt+1}/3 em {wait:.1f}s")
+                if "429" in last_err and attempt < MAX_ATTEMPTS - 1:
+                    wait = min(2 ** attempt + random.uniform(0.5, 2.0), 30.0)
+                    print(f"[IMG] Pollinations 429, retry {attempt+1}/{MAX_ATTEMPTS} em {wait:.1f}s")
                     await asyncio.sleep(wait)
                     continue
                 raise
 
         if img_bytes is None:
-            raise Exception(f"Lovable AI indisponível ({last_err})")
+            raise Exception(f"Pollinations AI indisponível após {MAX_ATTEMPTS} tentativas ({last_err})")
 
-        # 3) Guarda em cache para próximas vezes (todos os jogadores reutilizam)
-        save_cached_monster_image(mon_name, img_bytes)
-
-        file = discord.File(io.BytesIO(img_bytes), filename="monster.png")
+        # 3) Faz upload para canal Discord e guarda URL permanente
+        safe_filename = f"{_img_cache_key(mon_name)}.png"
+        discord_url = await upload_image_to_discord_cache(bot, img_bytes, safe_filename)
 
         desc_line = entry.get("desc", f"{entry.get('t','').capitalize()} • {entry.get('rare','')}")
         embed = discord.Embed(
@@ -3081,10 +3132,19 @@ async def monster_image(interaction: discord.Interaction, nome: str):
             description=desc_line,
             color=RARE_COLOR.get(entry.get("rare"), 0x888888)
         )
-        embed.set_image(url="attachment://monster.png")
-        embed.set_footer(text="🎨 Gerado com Pollinations AI (flux)")
 
-        await interaction.followup.send(embed=embed, file=file)
+        if discord_url:
+            # Guardou no Discord → usa URL permanente
+            store_cached_image_url(mon_name, discord_url)
+            embed.set_image(url=discord_url)
+            embed.set_footer(text="🎨 Gerado com Pollinations AI (flux) • guardado no cache")
+            await interaction.followup.send(embed=embed)
+        else:
+            # Canal não configurado → envia os bytes directamente (sem cache permanente)
+            file = discord.File(io.BytesIO(img_bytes), filename="monster.png")
+            embed.set_image(url="attachment://monster.png")
+            embed.set_footer(text="🎨 Gerado com Pollinations AI (flux) — configura IMAGE_CACHE_CHANNEL para cache permanente")
+            await interaction.followup.send(embed=embed, file=file)
 
     except Exception as e:
         print(f"[ERRO IMAGEM] {entry.get('n', nome)} → {type(e).__name__}: {str(e)}")
@@ -3160,10 +3220,15 @@ async def _pregenerate_monster_images():
                 seen.add(key)
                 all_entries.append(m)
 
-        pending = [m for m in all_entries if not get_cached_monster_image(m["n"])]
+        pending = [m for m in all_entries if not get_cached_image_url(m["n"])]
         total = len(pending)
         if total == 0:
             print("[img-pregen] todas as imagens já estão em cache ✅")
+            return
+
+        if not IMAGE_CACHE_CHANNEL_ID:
+            print("[img-pregen] IMAGE_CACHE_CHANNEL não configurado — pré-geração desativada")
+            print("[img-pregen] Define a variável de ambiente IMAGE_CACHE_CHANNEL com o ID do canal")
             return
 
         print(f"[img-pregen] iniciando pré-geração de {total} imagens em background…")
@@ -3171,18 +3236,38 @@ async def _pregenerate_monster_images():
         fail = 0
         for m in pending:
             try:
-                if get_cached_monster_image(m["n"]):
-                    continue  # outro caller já gerou entretanto
-                data = await _fetch_monster_image_bytes(m)
-                save_cached_monster_image(m["n"], data)
-                done += 1
-                if done % 10 == 0:
+                if get_cached_image_url(m["n"]):
+                    continue  # já gerado entretanto
+                # Retry com backoff para lidar com 429 da Pollinations AI
+                img_data = None
+                for pregen_attempt in range(4):
+                    try:
+                        img_data = await _fetch_monster_image_bytes(m)
+                        break
+                    except Exception as e:
+                        err_str = str(e)
+                        if "429" in err_str and pregen_attempt < 3:
+                            wait = min(10 * (2 ** pregen_attempt) + random.uniform(0, 5), 120)
+                            print(f"[img-pregen] 429 em {m.get('n','?')}, aguardar {wait:.0f}s…")
+                            await asyncio.sleep(wait)
+                            continue
+                        raise
+                if img_data:
+                    safe_fn = f"{_img_cache_key(m['n'])}.png"
+                    url = await upload_image_to_discord_cache(bot, img_data, safe_fn)
+                    if url:
+                        store_cached_image_url(m["n"], url)
+                        done += 1
+                    else:
+                        print(f"[img-pregen] upload falhou para {m.get('n','?')}")
+                        fail += 1
+                if done % 10 == 0 and done > 0:
                     print(f"[img-pregen] progresso: {done}/{total} (falhas: {fail})")
             except Exception as e:
                 fail += 1
                 print(f"[img-pregen] falha em {m.get('n','?')}: {e}")
-            # pausa pequena para evitar rate-limit do Lovable AI Gateway
-            await asyncio.sleep(3)
+            # Pausa entre imagens para respeitar rate-limit
+            await asyncio.sleep(5)
         print(f"[img-pregen] concluído ✅ geradas={done} falhas={fail} total={total}")
     except Exception as e:
         print(f"[img-pregen] erro fatal: {e}")
