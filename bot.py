@@ -14,8 +14,72 @@ import asyncio
 import time
 import urllib.parse
 import aiohttp
+import base64
 import io
 from typing import Optional
+
+# ══════════════════════════════════════════════
+# LOVABLE AI GATEWAY — Geração de imagem (Nano Banana)
+# ══════════════════════════════════════════════
+LOVABLE_API_KEY = os.environ.get("LOVABLE_API_KEY", "").strip()
+LOVABLE_AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions"
+LOVABLE_IMAGE_MODEL = "google/gemini-2.5-flash-image"  # Nano Banana
+
+async def _lovable_generate_image_bytes(prompt: str) -> bytes:
+    """
+    Gera bytes PNG de uma imagem usando o Lovable AI Gateway (Nano Banana).
+    Estável e gratuito (dentro do tier do workspace Lovable).
+    Lança Exception com mensagem clara em caso de erro.
+    """
+    if not LOVABLE_API_KEY:
+        raise Exception(
+            "LOVABLE_API_KEY não configurada. Define a variável de ambiente "
+            "LOVABLE_API_KEY no servidor onde o bot corre."
+        )
+
+    payload = {
+        "model": LOVABLE_IMAGE_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "modalities": ["image", "text"],
+    }
+    headers = {
+        "Authorization": f"Bearer {LOVABLE_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    timeout = aiohttp.ClientTimeout(total=120, connect=15)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(LOVABLE_AI_URL, json=payload, headers=headers) as resp:
+            if resp.status == 429:
+                raise Exception("Lovable AI rate-limit (429) — tenta novamente daqui a uns segundos")
+            if resp.status == 402:
+                raise Exception("Lovable AI sem créditos (402) — adiciona créditos em Settings → Workspace → Usage")
+            if resp.status != 200:
+                body = await resp.text()
+                raise Exception(f"Lovable AI HTTP {resp.status}: {body[:200]}")
+            data = await resp.json()
+
+    try:
+        image_url = data["choices"][0]["message"]["images"][0]["image_url"]["url"]
+    except (KeyError, IndexError, TypeError):
+        raise Exception(f"Resposta inesperada da Lovable AI: {str(data)[:200]}")
+
+    if image_url.startswith("data:"):
+        try:
+            b64 = image_url.split(",", 1)[1]
+            img_bytes = base64.b64decode(b64)
+        except Exception as e:
+            raise Exception(f"Falha a descodificar base64 da imagem: {e}")
+    else:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(image_url) as resp:
+                if resp.status != 200:
+                    raise Exception(f"Falha a baixar imagem URL ({resp.status})")
+                img_bytes = await resp.read()
+
+    if not img_bytes or len(img_bytes) < 1000:
+        raise Exception("Imagem vazia/corrompida recebida da Lovable AI")
+    return img_bytes
 # ══════════════════════════════════════════════
 # CONFIGURAÇÕES DE SAVE (NOVO)
 # ══════════════════════════════════════════════
@@ -1201,24 +1265,9 @@ def save_cached_monster_image(name: str, img_bytes: bytes) -> bool:
         return False
 
 async def _fetch_monster_image_bytes(entry):
-    """Gera (via Pollinations) os bytes da imagem de um monstro. Não usa cache."""
-    import aiohttp as _aiohttp
+    """Gera (via Lovable AI / Nano Banana) os bytes da imagem de um monstro. Não usa cache."""
     prompt = await gerar_prompt_imagem(entry)
-    encoded = urllib.parse.quote(prompt)
-    seed = random.randint(100000, 999999)
-    img_url = (
-        f"https://image.pollinations.ai/prompt/{encoded}"
-        f"?width=512&height=512&nologo=true&seed={seed}&model=turbo"
-    )
-    timeout = _aiohttp.ClientTimeout(total=90, connect=15)
-    async with _aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.get(img_url) as resp:
-            if resp.status != 200:
-                raise Exception(f"Pollinations status {resp.status}")
-            data = await resp.read()
-            if len(data) < 1000:
-                raise Exception("Imagem vazia/corrompida")
-            return data
+    return await _lovable_generate_image_bytes(prompt)
 
 def default_save():
     return {
@@ -3029,55 +3078,30 @@ async def monster_image(interaction: discord.Interaction, nome: str):
             await interaction.followup.send(embed=embed, file=file)
             return
 
-        # 2) Não está em cache → gera com Pollinations
+        # 2) Não está em cache → gera via Lovable AI Gateway (Nano Banana)
         prompt = await gerar_prompt_imagem(entry)
-
-        encoded = urllib.parse.quote(prompt)
-        seed = random.randint(100000, 999999)
-        img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=512&height=512&nologo=true&seed={seed}&model=turbo"
-
         print(f"[IMG] {mon_name} → cache MISS | tipo={entry.get('t')} | prompt={prompt[:120]}")
 
-        timeout = aiohttp.ClientTimeout(total=90, connect=10)
+        # Pequena retry com backoff em caso de 429 do gateway
         img_bytes = None
         last_err = None
-        # Tenta vários modelos / backoff em caso de 429 (rate limit)
-        models_fallback = ["turbo", "flux", "flux-realism"]
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            for attempt in range(5):
-                model = models_fallback[attempt % len(models_fallback)]
-                seed_try = random.randint(100000, 999999)
-                try_url = (
-                    f"https://image.pollinations.ai/prompt/{encoded}"
-                    f"?width=512&height=512&nologo=true&seed={seed_try}&model={model}"
-                )
-                try:
-                    async with session.get(try_url) as resp:
-                        if resp.status == 200:
-                            data = await resp.read()
-                            if len(data) >= 1000:
-                                img_bytes = data
-                                break
-                            last_err = "Imagem vazia"
-                        elif resp.status == 429:
-                            wait = 2 ** attempt + random.random()
-                            print(f"[IMG] 429 rate-limit, retry {attempt+1}/5 em {wait:.1f}s (model={model})")
-                            await asyncio.sleep(wait)
-                            last_err = "Pollinations rate-limit (429)"
-                            continue
-                        else:
-                            error_text = await resp.text()
-                            print(f"[IMG ERR] Pollinations {resp.status}: {error_text[:200]}")
-                            last_err = f"status {resp.status}"
-                            await asyncio.sleep(1.5)
-                except asyncio.TimeoutError:
-                    last_err = "timeout"
-                    await asyncio.sleep(1.5)
+        for attempt in range(3):
+            try:
+                img_bytes = await _lovable_generate_image_bytes(prompt)
+                break
+            except Exception as e:
+                last_err = str(e)
+                if "429" in last_err and attempt < 2:
+                    wait = 2 ** attempt + random.random()
+                    print(f"[IMG] Lovable AI 429, retry {attempt+1}/3 em {wait:.1f}s")
+                    await asyncio.sleep(wait)
+                    continue
+                raise
 
         if img_bytes is None:
-            raise Exception(f"Pollinations indisponível após 5 tentativas ({last_err})")
+            raise Exception(f"Lovable AI indisponível ({last_err})")
 
-        # 3) Guarda em cache para próximas vezes
+        # 3) Guarda em cache para próximas vezes (todos os jogadores reutilizam)
         save_cached_monster_image(mon_name, img_bytes)
 
         file = discord.File(io.BytesIO(img_bytes), filename="monster.png")
@@ -3089,7 +3113,7 @@ async def monster_image(interaction: discord.Interaction, nome: str):
             color=RARE_COLOR.get(entry.get("rare"), 0x888888)
         )
         embed.set_image(url="attachment://monster.png")
-        embed.set_footer(text="🎨 Gerado com Flux AI")
+        embed.set_footer(text="🎨 Gerado com Lovable AI (Nano Banana)")
 
         await interaction.followup.send(embed=embed, file=file)
 
@@ -3188,7 +3212,7 @@ async def _pregenerate_monster_images():
             except Exception as e:
                 fail += 1
                 print(f"[img-pregen] falha em {m.get('n','?')}: {e}")
-            # pausa para não sobrecarregar o Pollinations (free tier)
+            # pausa pequena para evitar rate-limit do Lovable AI Gateway
             await asyncio.sleep(3)
         print(f"[img-pregen] concluído ✅ geradas={done} falhas={fail} total={total}")
     except Exception as e:
