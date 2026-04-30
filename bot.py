@@ -3038,16 +3038,44 @@ async def monster_image(interaction: discord.Interaction, nome: str):
 
         print(f"[IMG] {mon_name} → cache MISS | tipo={entry.get('t')} | prompt={prompt[:120]}")
 
-        timeout = aiohttp.ClientTimeout(total=60, connect=10)
+        timeout = aiohttp.ClientTimeout(total=90, connect=10)
+        img_bytes = None
+        last_err = None
+        # Tenta vários modelos / backoff em caso de 429 (rate limit)
+        models_fallback = ["turbo", "flux", "flux-realism"]
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(img_url) as resp:
-                if resp.status != 200:
-                    error_text = await resp.text()
-                    print(f"[IMG ERR] Pollinations {resp.status}: {error_text[:300]}")
-                    raise Exception(f"Pollinations retornou status {resp.status}")
-                img_bytes = await resp.read()
-                if len(img_bytes) < 1000:
-                    raise Exception("Imagem retornada está vazia ou corrompida")
+            for attempt in range(5):
+                model = models_fallback[attempt % len(models_fallback)]
+                seed_try = random.randint(100000, 999999)
+                try_url = (
+                    f"https://image.pollinations.ai/prompt/{encoded}"
+                    f"?width=512&height=512&nologo=true&seed={seed_try}&model={model}"
+                )
+                try:
+                    async with session.get(try_url) as resp:
+                        if resp.status == 200:
+                            data = await resp.read()
+                            if len(data) >= 1000:
+                                img_bytes = data
+                                break
+                            last_err = "Imagem vazia"
+                        elif resp.status == 429:
+                            wait = 2 ** attempt + random.random()
+                            print(f"[IMG] 429 rate-limit, retry {attempt+1}/5 em {wait:.1f}s (model={model})")
+                            await asyncio.sleep(wait)
+                            last_err = "Pollinations rate-limit (429)"
+                            continue
+                        else:
+                            error_text = await resp.text()
+                            print(f"[IMG ERR] Pollinations {resp.status}: {error_text[:200]}")
+                            last_err = f"status {resp.status}"
+                            await asyncio.sleep(1.5)
+                except asyncio.TimeoutError:
+                    last_err = "timeout"
+                    await asyncio.sleep(1.5)
+
+        if img_bytes is None:
+            raise Exception(f"Pollinations indisponível após 5 tentativas ({last_err})")
 
         # 3) Guarda em cache para próximas vezes
         save_cached_monster_image(mon_name, img_bytes)
