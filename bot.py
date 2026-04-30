@@ -633,13 +633,61 @@ def default_save():
         "enemyHits":0,"enemyAtkTimer":0,"lastEnemyAtk":0,
     }
 
+def _migrate_save(saved: dict) -> dict:
+    """
+    Migração de save entre versões.
+    Garante que campos novos são adicionados sem apagar dados do jogador.
+    Listas e dicts do jogador (team, box, materials, items, caught…) são SEMPRE preservados.
+    """
+    defaults = default_save()
+
+    # Campos que pertencem ao jogador — nunca sobrescrever com valor padrão
+    PLAYER_OWNED = {
+        "gold","balls","masterball","team","box","caught","bossDefeated",
+        "materials","items","activeMonId","nextMonId","rebirthCount","level",
+        "battles","rankedElo","rankedWins","rankedLosses","playerName","playerId",
+        "friendScores","rareSpawnPassive","matBonus","catchBonus","battleBonus",
+        "nicoPotions","bossRepelUntil","pendingBoss","megaIncenseUntil",
+        "rareCatchBonus","typeDetectActive","xatkActive","battleUsed",
+        "attackCooldownUntil","forcedRarity","forcedType",
+    }
+
+    merged = {}
+
+    # Para cada campo do default: usa o valor do jogador se existir, senão usa o padrão
+    for key, default_val in defaults.items():
+        if key in saved:
+            merged[key] = saved[key]
+        else:
+            merged[key] = default_val
+            if key not in PLAYER_OWNED:
+                print(f"[migrate] novo campo '{key}' inicializado no save {saved.get('playerId','?')}")
+
+    # Preserva campos extras que o save tenha (compatibilidade futura)
+    for key in saved:
+        if key not in merged:
+            merged[key] = saved[key]
+
+    # Garante que cada monstro na equipa/box tem todos os campos base
+    MON_DEFAULTS = {
+        "xp":0,"level":1,"tier":1,"hpBoost":0,"atkBoost":0,
+        "alive":True,"customBaseStats":False,
+    }
+    for mon in merged.get("team",[]) + merged.get("box",[]):
+        for mk, mv in MON_DEFAULTS.items():
+            if mk not in mon:
+                mon[mk] = mv
+
+    return merged
+
 def load_save(uid):
     p=save_path(uid)
     if os.path.exists(p):
         try:
             with open(p,encoding="utf-8") as f: raw=f.read().strip()
             if not raw: raise ValueError("vazio")
-            d=default_save(); d.update(json.loads(raw)); return d
+            saved=json.loads(raw)
+            return _migrate_save(saved)
         except Exception as e:
             print(f"Save corrompido {uid}: {e}")
             try: os.rename(p,p+".corrupted")
@@ -1584,12 +1632,137 @@ async def sell_mats(interaction: discord.Interaction):
 # COMANDO /imagem — GERA IMAGEM DO MONSTER
 # ══════════════════════════════════════════════
 
+# Mapeamento emoji → descrição visual para o Claude usar no prompt
+EMOJI_VISUAL = {
+    "🔥":"feito de chamas vivas, corpo incandescente cor de brasa",
+    "🦊":"raposa ágil com pelagem cor de fogo",
+    "🐅":"tigre flamejante com listras de lava",
+    "🐲":"dragão com escamas flamejantes",
+    "💧":"corpo translúcido de água, gotículas flutuantes",
+    "🐟":"peixe gigante com escamas brilhantes azuis",
+    "🌊":"criatura feita de ondas do oceano",
+    "🌿":"criatura vegetal com folhas e vinhas pelo corpo",
+    "🍀":"corpo coberto de trevo e musgo",
+    "🌱":"pequena planta animada com raízes como pernas",
+    "🪨":"corpo rochoso e maciço, pele de pedra",
+    "🐗":"javali colossal de pedra e terra",
+    "⛰️":"criatura montanhosa, enorme e rochosa",
+    "🪶":"ave etérea com penas que flutuam no vento",
+    "☁️":"ser feito de nuvens e vento com forma vaga",
+    "🌬️":"criatura de ar invisível com redemoinhos visíveis",
+    "❄️":"ser cristalino de gelo com arestas afiadas",
+    "⛄":"golem de neve com olhos brilhantes",
+    "🧊":"cubo de gelo vivo com núcleo azul pulsante",
+    "⚡":"criatura elétrica faíscas constantes no corpo",
+    "🔋":"robô-animal com células de energia no peito",
+    "🌑":"ser de trevas absolutas, forma indefinida e sombria",
+    "🦇":"morcego sombrio gigante com asas negras",
+    "💎":"criatura de cristal facetado translúcido",
+    "☠️":"ser venenoso esverdeado com gases tóxicos ao redor",
+    "🐍":"serpente venenosa com escamas roxas e presas longas",
+    "🎵":"ser musical feito de notas e ondas sonoras",
+    "⌛":"criatura do tempo com corpo de ampulheta e engrenagens",
+    "☀️":"ser luminoso com corpo solar e raios de luz",
+    "🌌":"entidade cósmica com galáxias no corpo",
+    "🪐":"ser com anéis planetários ao redor do corpo",
+    "⚙️":"golem metálico coberto de engrenagens e aço",
+    "⛓️":"criatura de correntes e metal fundido",
+    "👻":"fantasma translúcido com forma etérea e brilhante",
+    "🫥":"ser quase invisível com contorno brilhante",
+    "🐉":"dragão majestoso com asas enormes e fogo nas fauces",
+    "🦕":"dinossauro dracônico com escamas e chifres",
+    "🧚":"fada luminosa com asas delicadas e pó mágico",
+    "🌸":"ser de pétalas cor-de-rosa e magia floral",
+    "🔮":"ser psíquico com olho no centro e aura violeta",
+    "🧠":"criatura com cérebro exposto e ondas mentais visíveis",
+    "👊":"lutador musculoso com punhos de aço e aura de combate",
+    "🥊":"boxeador-monstro com corpo definido e luvas mágicas",
+    "🐛":"larva gigante com mandíbulas e corpo segmentado",
+    "🦋":"borboleta-monstro com asas de padrão hipnótico",
+    "🟢":"criatura néon verde com circuitos brilhantes na pele",
+    "💻":"ser digital pixelado com dados flutuando",
+    "☢️":"mutante radioativo brilhante e deformado",
+    "🙏":"ser espiritual com aura dourada e forma humanoide serena",
+    "🤖":"robô-monstro imponente com armor pesado",
+    "🌪️":"tornado vivo com olho da tempestade brilhante",
+    "🌋":"criatura de magma e rocha derretida",
+    "🪄":"ser mágico arcano com runas flutuando ao redor",
+    "👹":"demônio com chifres, dentes afiados e corpo vermelho",
+    "🐋":"baleia colossal com tentáculos de água",
+    "🎻":"ser musical sombrio com instrumentos no corpo",
+    "🕰️":"golem de relógio com tempo congelado ao redor",
+    "👼":"anjo guerreiro com asas douradas e armadura celestial",
+    "🕳️":"singularidade viva, buraco negro com forma de criatura",
+    "🐝":"abelha-rainha gigante com ferrão de energia",
+    "👑":"rei-monstro com coroa de cristal e manto sombrio",
+    "🐈":"gato misterioso com olhos cósmicos e sorriso eterno",
+    "👨‍🦽":"figura humanoide perturbadora em cadeira de rodas sombria",
+    "❓":"entidade desconhecida sem forma definida, iridescente",
+    "🐐":"cabra divina colossal com chifres dourados e aura de deus",
+}
+
+async def _gerar_descricao_visual_claude(mon_name, mon_type, mon_rare, mon_emoji, is_boss, title_lore, atk, hp):
+    """Chama a API do Claude para gerar uma descrição visual detalhada e fiel ao monster."""
+    import aiohttp
+
+    emoji_hint = EMOJI_VISUAL.get(mon_emoji, "")
+
+    rarity_power = {
+        "comum": "pequeno e inofensivo, aparência simples",
+        "incomum": "de tamanho médio, aspecto interessante e colorido",
+        "raro": "grande e ameaçador, detalhes marcantes",
+        "épico": "imponente e majestoso, corpo impressionante",
+        "lendário": "enorme e lendário, emana poder visível",
+        "mítico": "transcendente, corpo brilhante e sobrenatural",
+        "divino": "divino, radiante de luz e energia celestial",
+        "boss": "colossal e aterrorizante, presença avassaladora",
+    }.get(mon_rare, "misterioso")
+
+    system_prompt = (
+        "You are a creature concept artist for a Portuguese monster-catching RPG game. "
+        "Your job is to write ultra-precise English image generation prompts for AI art tools. "
+        "The prompt must make the creature look EXACTLY like its name, type, emoji and lore suggest. "
+        "Be very specific about: body shape, colors, textures, elemental effects, size, pose. "
+        "Output ONLY the image prompt, nothing else. No explanations. Max 120 words."
+    )
+
+    user_msg = (
+        f"Create an image generation prompt for this monster:\n"
+        f"- Name: {mon_name} (Portuguese name, use its meaning as visual inspiration)\n"
+        f"- Element/Type: {mon_type}\n"
+        f"- Emoji representation: {mon_emoji} — visual hint: {emoji_hint}\n"
+        f"- Rarity/Power: {mon_rare} — {rarity_power}\n"
+        f"- ATK: {atk} / HP: {hp}\n"
+        + (f"- Boss title: '{title_lore}' — make it look like a terrifying final boss\n" if is_boss else "")
+        + f"\nThe prompt must describe: creature body, colors tied to '{mon_type}' element, "
+        f"size matching rarity, dynamic pose, elemental aura/effects, RPG fantasy art style. "
+        f"Background should reflect the '{mon_type}' environment. No text in image."
+    )
+
+    payload = {
+        "model": "claude-sonnet-4-20250514",
+        "max_tokens": 300,
+        "system": system_prompt,
+        "messages": [{"role": "user", "content": user_msg}]
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            "https://api.anthropic.com/v1/messages",
+            json=payload,
+            timeout=aiohttp.ClientTimeout(total=20)
+        ) as resp:
+            if resp.status != 200:
+                raise Exception(f"Claude API HTTP {resp.status}")
+            data = await resp.json()
+            return data["content"][0]["text"].strip()
+
 @tree.command(name="imagem", description="Gera uma imagem artística de um monster")
 @app_commands.describe(nome="Nome do monster (ex: Flaminho, Rei das Chamas...)")
 async def monster_image(interaction: discord.Interaction, nome: str):
-    import aiohttp, io
+    import aiohttp, io, urllib.parse
 
-    # Procura o monster no índice de mons ou bosses
+    # Procura o monster nos índices
     mon_data = MON_INDEX.get(nome) or next(
         (m for m in MONS if nome.lower() in m["n"].lower()), None)
     boss_data = BOSS_INDEX.get(nome) or next(
@@ -1601,55 +1774,51 @@ async def monster_image(interaction: discord.Interaction, nome: str):
             f"❌ Monster **{nome}** não encontrado! Verifica o nome em `/pokedex` ou `/inventario`.",
             ephemeral=True); return
 
-    mon_name  = entry["n"]
-    mon_emoji = entry.get("e", "❓")
-    mon_type  = entry.get("t", "desconhecido")
-    mon_rare  = entry.get("rare", "boss" if boss_data else "comum")
-    is_boss   = boss_data is not None
+    mon_name   = entry["n"]
+    mon_emoji  = entry.get("e", "❓")
+    mon_type   = entry.get("t", "desconhecido")
+    mon_rare   = entry.get("rare", "boss" if boss_data else "comum")
+    is_boss    = boss_data is not None
     title_lore = entry.get("title", "")
-
-    # Monta prompt rico para a geração de imagem
-    rarity_desc = {
-        "comum":"simples e amigável","incomum":"colorido e interessante",
-        "raro":"poderoso e detalhado","épico":"majestoso e imponente",
-        "lendário":"épico, radiante, lendário","mítico":"transcendente, brilhante e místico",
-        "divino":"divino, dourado, celestial, cheio de luz","boss":"aterrorizante e colossal",
-    }.get(mon_rare, "misterioso")
-
-    prompt = (
-        f"A detailed fantasy creature art of '{mon_name}', a {mon_type}-type monster. "
-        f"Style: {rarity_desc}, vibrant colors, RPG game art style. "
-        + (f"It is a legendary boss known as '{title_lore}'. Intimidating and huge. " if is_boss else "")
-        + f"Full body view, dynamic pose, glowing effects, detailed texture. "
-        f"No text, no watermarks, clean background with {mon_type}-themed atmosphere."
-    )
+    atk        = entry.get("atk", "?")
+    hp         = entry.get("hp", "?")
 
     await interaction.response.defer(thinking=True)
 
     try:
-        # Usa a API de imagens do Pollinations (gratuita, sem key)
-        encoded_prompt = prompt.replace(" ", "%20").replace("'", "%27").replace(",", "%2C")
-        img_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=512&height=512&nologo=true&seed={abs(hash(mon_name))%9999}"
+        # Passo 1: Claude gera um prompt visual preciso e fiel ao monster
+        image_prompt = await _gerar_descricao_visual_claude(
+            mon_name, mon_type, mon_rare, mon_emoji, is_boss, title_lore, atk, hp
+        )
+        print(f"[imagem] prompt gerado para {mon_name}: {image_prompt[:80]}...")
+
+        # Passo 2: Pollinations gera a imagem com esse prompt
+        encoded = urllib.parse.quote(image_prompt)
+        seed = abs(hash(mon_name + mon_type)) % 99999
+        img_url = (
+            f"https://image.pollinations.ai/prompt/{encoded}"
+            f"?width=512&height=512&nologo=true&seed={seed}&model=flux"
+        )
 
         async with aiohttp.ClientSession() as session:
-            async with session.get(img_url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            async with session.get(img_url, timeout=aiohttp.ClientTimeout(total=45)) as resp:
                 if resp.status != 200:
-                    raise Exception(f"HTTP {resp.status}")
+                    raise Exception(f"Pollinations HTTP {resp.status}")
                 img_bytes = await resp.read()
 
+        # Passo 3: Envia embed com a imagem
         color = RARE_COLOR.get(mon_rare, 0x888888)
         embed = discord.Embed(
             title=f"{mon_emoji} {mon_name}",
             description=(
                 f"{type_badge(mon_type)} · {rare_badge(mon_rare)}"
                 + (f"\n*{title_lore}*" if title_lore else "")
-                + (f"\n⚔️ ATK: **{entry.get('atk','?')}** · ❤️ HP: **{entry.get('hp','?')}**" if is_boss else
-                   f"\n⚔️ ATK: **{entry.get('atk','?')}** · ❤️ HP: **{entry.get('hp','?')}**")
+                + f"\n⚔️ ATK: **{atk}** · ❤️ HP: **{hp}**"
             ),
             color=color
         )
         embed.set_image(url="attachment://monster.png")
-        embed.set_footer(text="🎨 Imagem gerada por IA • Monster Hunter RPG")
+        embed.set_footer(text="🎨 Descrição gerada por Claude • Imagem por Pollinations AI")
 
         file = discord.File(io.BytesIO(img_bytes), filename="monster.png")
         await interaction.followup.send(embed=embed, file=file)
