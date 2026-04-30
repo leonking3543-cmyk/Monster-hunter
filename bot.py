@@ -3130,7 +3130,7 @@ async def monster_image(interaction: discord.Interaction, nome: str):
         MAX_ATTEMPTS = 5
         for attempt in range(MAX_ATTEMPTS):
             try:
-                img_bytes = await generate_image_with_queue(mon_name, prompt)
+                img_bytes = await generate_image_with_queue(prompt)
                 break
             except Exception as e:
                 last_err = str(e)
