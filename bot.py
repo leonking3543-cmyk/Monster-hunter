@@ -1927,52 +1927,52 @@ async def gerar_prompt_imagem(mon):
 async def monster_image(interaction: discord.Interaction, nome: str):
     await interaction.response.defer(thinking=True)
 
-    # Busca o monstro
-    entry = MON_INDEX.get(nome) or next((m for m in MONS if nome.lower() in m["n"].lower()), None)
-    if not entry:
-        entry = BOSS_INDEX.get(nome) or next((b for b in BOSSES if nome.lower() in b["n"].lower()), None)
+    # Busca o monstro (melhorada)
+    entry = (MON_INDEX.get(nome) or 
+             next((m for m in MONS if nome.lower() in m["n"].lower()), None) or
+             BOSS_INDEX.get(nome) or 
+             next((b for b in BOSSES if nome.lower() in b["n"].lower()), None))
 
     if not entry:
         await interaction.followup.send(f"❌ Monster **{nome}** não encontrado!", ephemeral=True)
         return
 
     try:
-        prompt = f"{entry.get('n', nome)}, {entry.get('t', 'fantasy')} monster, rpg style, detailed, vibrant colors, fantasy art"
+        # Prompt mais simples e direto para evitar erros
+        prompt = f"{entry['n']}, {entry.get('t', 'fantasy')} type monster, rpg style, {entry.get('e', '')}, detailed fantasy art, vibrant colors, dynamic pose"
 
         encoded = urllib.parse.quote(prompt)
-        seed = random.randint(1, 999999)
+        seed = random.randint(100000, 999999)
+
         img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=768&height=768&nologo=true&seed={seed}&model=flux"
 
-        print(f"[DEBUG] Gerando imagem para: {entry.get('n', nome)}")
-        print(f"[DEBUG] Prompt: {prompt[:150]}...")
-        print(f"[DEBUG] URL: {img_url[:300]}...")
+        print(f"[DEBUG] Tentando gerar: {entry['n']} | Tipo: {entry.get('t')}")
 
         async with aiohttp.ClientSession() as session:
-            async with session.get(img_url, timeout=50) as resp:
-                print(f"[DEBUG] Status HTTP: {resp.status}")
+            async with session.get(img_url, timeout=45) as resp:
                 if resp.status != 200:
                     error_text = await resp.text()
-                    print(f"[DEBUG] Erro do Pollinations: {error_text[:400]}")
-                    raise Exception(f"Pollinations retornou status {resp.status}")
+                    print(f"[DEBUG] Erro Pollinations ({resp.status}): {error_text[:300]}")
+                    raise Exception(f"Pollinations error {resp.status}")
 
                 img_bytes = await resp.read()
-                print(f"[DEBUG] Imagem baixada com sucesso! Tamanho: {len(img_bytes)} bytes")
 
         file = discord.File(io.BytesIO(img_bytes), filename="monster.png")
 
         embed = discord.Embed(
-            title=f"{entry.get('e', '❓')} {entry.get('n', nome)}", 
-            color=0x00ffcc
+            title=f"{entry.get('e', '❓')} {entry['n']}",
+            description=f"{entry.get('t', '')} • {entry.get('rare', '')}",
+            color=RARE_COLOR.get(entry.get("rare"), 0x888888)
         )
         embed.set_image(url="attachment://monster.png")
-        embed.set_footer(text="Debug mode - Imagem gerada")
+        embed.set_footer(text="Gerado com Flux")
 
         await interaction.followup.send(embed=embed, file=file)
 
     except Exception as e:
-        print(f"[ERRO IMAGEM] {entry.get('n', nome)} → {type(e).__name__}: {e}")
+        print(f"[ERRO IMAGEM] {entry.get('n', nome)} → {type(e).__name__}: {str(e)}")
         await interaction.followup.send(
-            f"❌ Erro ao gerar imagem de **{entry.get('n', nome)}**.\n\n`{str(e)[:300]}`",
+            f"❌ Erro ao gerar imagem de **{entry.get('n', nome)}**.\n\nErro: `{str(e)[:150]}`",
             ephemeral=True
         )
 
