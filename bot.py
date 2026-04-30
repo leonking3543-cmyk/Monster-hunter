@@ -1856,49 +1856,69 @@ async def _gerar_descricao_visual_claude(mon_name, mon_type, mon_rare, mon_emoji
 # ══════════════════════════════════════════════
 
 async def gerar_prompt_imagem(mon):
-    """Gera prompt detalhado para o Flux no Pollinations"""
+    """Versão melhorada - funciona melhor para +400 monstros"""
+    
     nome = mon.get("n", "Monstro")
     tipo = mon.get("t", "").lower()
     emoji = mon.get("e", "❓")
     rare = mon.get("rare", "comum").lower()
     is_boss = mon.get("hp", 0) > 800 or bool(mon.get("title")) or rare in ["boss", "mítico", "lendário", "divino"]
 
-    type_descriptions = {
-        "néon": "cyberpunk neon creature, glowing cyan magenta and pink circuits, digital glitch effects, holographic elements, vibrant neon lights, synthwave aesthetic, futuristic digital monster, LED accents, pixel details, high tech",
-        "fogo": "fiery elemental creature made of living flames and magma, glowing orange red and yellow, lava cracks on skin, intense fire aura, floating embers",
-        "água": "translucent aquatic being made of flowing water, deep blue cyan tones, bubbles and water ripples, elegant liquid form",
-        "planta": "verdant plant creature covered in leaves vines and flowers, vibrant green, organic textures, glowing bioluminescence",
-        "dragão": "majestic dragon with powerful scaled body, large wings, sharp horns, fierce expression, fantasy dragon",
-        "sombra": "ethereal shadowy creature, dark purple and black with glowing eyes, smoky tendrils, mysterious dark aura",
-        "trovão": "electric creature crackling with lightning, bright yellow blue sparks, energetic pose, thunder effects",
-        "gelo": "crystalline ice creature with sharp frost edges, cool blue white tones, snow particles, frozen majestic form",
-        "metal": "heavily armored mechanical golem made of steel and gears, metallic shine, industrial details",
-        "fantasma": "translucent ghostly being, ethereal glow, floating form, spooky beautiful fantasy ghost",
-        "nuclear": "radioactive mutant creature, glowing green toxic aura, deformed body, nuclear energy effects",
-        "cosmos": "cosmic entity with galaxies and stars inside body, nebulae, space theme, celestial being",
-        "arcano": "mystical arcane creature with glowing runes, magical aura, purple and gold tones",
+    # Descrições visuais por tipo (cobertura ampla)
+    type_style = {
+        "néon": "cyberpunk neon creature, glowing cyan magenta pink circuits, digital glitch effects, holographic elements, synthwave, futuristic digital monster, LED accents",
+        "fogo": "fiery elemental creature, living flames and magma, glowing orange red yellow, lava cracks, intense fire aura, floating embers",
+        "água": "translucent aquatic elemental, flowing blue water body, bubbles, ripples, elegant liquid form",
+        "planta": "verdant plant creature, covered in green leaves vines flowers, organic textures, bioluminescence",
+        "terra": "earthy rock golem, stone and dirt body, rugged mountainous texture, powerful sturdy form",
+        "ar": "ethereal wind spirit, flowing air currents, feathers and clouds, light and agile form",
+        "gelo": "crystalline ice creature, sharp frost edges, cool blue white, snow particles, frozen majestic look",
+        "trovão": "electric lightning creature, bright yellow blue sparks, crackling energy, thunder effects",
+        "sombra": "dark shadowy being, purple black smoke, glowing eyes, ethereal dark tendrils",
+        "cristal": "translucent crystal creature, faceted glowing body, prismatic reflections, gem-like",
+        "veneno": "toxic poisonous creature, green purple slime, toxic gas aura, mutated dangerous look",
+        "som": "musical sound creature, made of sound waves and musical notes, vibrant colorful aura, audio visualization",
+        "tempo": "time manipulator creature, hourglass body, gears and clock elements, temporal distortion effects",
+        "luz": "radiant light being, bright golden white glow, solar rays, luminous divine appearance",
+        "cosmos": "cosmic celestial entity, galaxies stars nebulae inside body, space particles, divine cosmic look",
+        "metal": "heavy armored mechanical golem, steel gears plates, metallic shine, industrial robot monster",
+        "fantasma": "translucent ghostly creature, ethereal glow, floating form, spooky beautiful ghost",
+        "dragão": "majestic dragon with detailed scales, large wings, sharp horns, fierce fantasy dragon",
+        "fada": "beautiful fairy creature, delicate wings, magical sparkles, glowing pastel colors",
+        "psíquico": "psychic creature with glowing third eye, purple aura, mental energy waves",
+        "luta": "muscular fighter monster, strong physique, battle aura, fighting stance",
+        "inseto": "giant insectoid creature, detailed exoskeleton, wings or mandibles, bug-like features",
+        "nuclear": "radioactive glowing green mutant, toxic aura, nuclear energy effects, deformed body",
+        "espírito": "spiritual divine being, golden holy aura, serene yet powerful presence",
+        "mecânico": "mechanical robot monster, gears pistons wires, steampunk industrial design",
+        "ventos": "powerful wind tornado creature, swirling air currents, storm effects",
+        "magma": "molten magma beast, glowing lava body, rocky crust with cracks, volcanic creature",
+        "arcano": "mystical arcane sorcerer creature, glowing runes floating around, purple gold magical aura",
     }
 
-    rarity_boost = {
-        "comum": "cute small monster",
-        "incomum": "detailed interesting creature",
+    rarity_style = {
+        "comum": "small cute monster",
+        "incomum": "detailed colorful creature",
         "raro": "impressive powerful monster",
-        "épico": "epic majestic creature, highly detailed",
-        "lendário": "legendary powerful being, radiant aura",
-        "mítico": "mythical divine creature, glowing divine energy",
+        "épico": "epic majestic highly detailed creature",
+        "lendário": "legendary radiant being with powerful aura",
+        "mítico": "mythical divine creature glowing with energy",
         "boss": "colossal terrifying boss monster, massive scale, menacing presence"
     }.get(rare, "fantasy monster")
 
+    # Prompt final otimizado
     prompt = (
-        f"{nome}, {rarity_boost}, {type_descriptions.get(tipo, f'{tipo} elemental fantasy creature')}, "
-        f"representing emoji {emoji}, dynamic pose, intricate details, vibrant colors, sharp focus, "
-        f"fantasy RPG monster concept art, best quality, highly detailed, cinematic lighting"
+        f"{nome}, {rarity_style}, {tipo} type monster, "
+        f"{type_style.get(tipo, f'{tipo} elemental fantasy creature')}, "
+        f"visual representation inspired by emoji {emoji}, "
+        f"dynamic pose, intricate details, vibrant colors, sharp focus, "
+        f"beautiful fantasy RPG monster concept art, highly detailed, cinematic lighting, best quality"
     )
 
     if is_boss:
-        prompt += ", epic boss fight atmosphere, dark dramatic background, intense volumetric lighting"
+        prompt += ", epic boss battle atmosphere, dramatic lighting, intense presence"
 
-    prompt += ", fantasy style, no text, clean composition"
+    prompt += ", no text, clean composition, fantasy art style"
 
     return prompt
 
