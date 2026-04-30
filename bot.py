@@ -26,112 +26,50 @@ POLLINATIONS_URL = "https://image.pollinations.ai/prompt/{prompt}"
 _image_lock = asyncio.Lock()
 _next_api_call = 0.0
 
-async def generate_monster_image_safe(mon_name: str, prompt: str) -> bytes:
+async def generate_image_with_queue(prompt: str, max_attempts: int = 5) -> bytes:
     """
-    Garante que apenas uma imagem é gerada por vez, com seed fixa
-    e respeitando o rate-limit da Pollinations.
+    Gera uma imagem via Pollinations AI com fila global (um pedido de cada vez)
+    e backoff exponencial em caso de rate-limit (429).
     """
     global _next_api_call
-    
-    # Criamos um número (seed) único baseado no nome do monstro
-    # Isso garante que o monstro tenha sempre a mesma aparência no catálogo
-    fixed_seed = sum(ord(c) for c in mon_name) + 100
-    
-    encoded_prompt = urllib.parse.quote(prompt)
-    url = (
-        f"https://image.pollinations.ai/prompt/{encoded_prompt}"
-        f"?width=512&height=512&model=flux&seed={seed}&nologo=true&enhance=false"
-    )
+    last_err = None
 
-    timeout = aiohttp.ClientTimeout(total=180, connect=20)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.get(url) as resp:
-            if resp.status == 429:
-                raise Exception("429") # Rate limit
-            if resp.status != 200:
-                raise Exception(f"Erro HTTP {resp.status}")
-            return await resp.read()
-            
-    async with _image_lock: # FILA: Só entra um de cada vez aqui
-        for attempt in range(5):
-            # Espera se o rate-limit global ainda estiver ativo
+    async with _image_lock:
+        for attempt in range(max_attempts):
+            # Espera se ainda estiver em cooldown de um 429 anterior
             now = time.time()
             if now < _next_api_call:
                 await asyncio.sleep(_next_api_call - now)
 
             try:
-                timeout = aiohttp.ClientTimeout(total=60)
+                encoded_prompt = urllib.parse.quote(prompt)
+                url = (
+                    f"https://image.pollinations.ai/prompt/{encoded_prompt}"
+                    f"?width=512&height=512&model=flux&nologo=true&enhance=false"
+                )
+                timeout = aiohttp.ClientTimeout(total=180, connect=20)
                 async with aiohttp.ClientSession(timeout=timeout) as session:
                     async with session.get(url) as resp:
                         if resp.status == 429:
-                            # ERRO 429: API cansada. Espera entre 30s a 2min.
                             wait_time = min(30 * (attempt + 1), 120)
-                            print(f"⚠️ Rate-limit no catálogo! Pausando fila por {wait_time}s...")
+                            print(f"⚠️ [IMG] 429 — pausa de {wait_time}s (tentativa {attempt+1}/{max_attempts})")
                             _next_api_call = time.time() + wait_time
                             continue
-                        
-                        if resp.status == 200:
-                            data = await resp.read()
-                            if len(data) > 1000:
-                                # Sucesso! Pequena pausa de 5s para a próxima imagem
-                                _next_api_call = time.time() + 5.0 
-                                return data
-                
-            except Exception as e:
-                print(f"Erro na tentativa {attempt}: {e}")
-                await asyncio.sleep(5)
+                        if resp.status != 200:
+                            raise Exception(f"Erro HTTP {resp.status}")
+                        data = await resp.read()
+                        if len(data) > 1000:
+                            _next_api_call = time.time() + 5.0  # pausa mínima entre pedidos
+                            return data
+                        raise Exception("Resposta vazia da API")
 
-    raise Exception("Não foi possível gerar a imagem após várias tentativas.")
-    
-    _image_lock = asyncio.Lock()
-async def generate_image_with_queue(prompt: str, max_attempts=6) -> bytes:
-    """
-    Gere a fila global. Se bater no 429, bloqueia toda a fila por até 2 minutos,
-    impedindo que outros jogadores agravem o rate-limit.
-    """
-    global _next_allowed_api_call
-    last_err = None
-    
-    for attempt in range(max_attempts):
-        async with _image_generation_lock:
-            # 1. Verifica se temos de esperar por causa de um rate-limit anterior
-            now = time.time()
-            if now < _next_allowed_api_call:
-                await asyncio.sleep(_next_allowed_api_call - now)
-            
-            try:
-                # 2. Tenta gerar a imagem
-                img_bytes = await generate_image_with_queue(prompt)
-                
-                # 3. Sucesso! Define um delay mínimo (3s) antes do próximo pedido global
-                _next_allowed_api_call = time.time() + 3.0 
-                return img_bytes
-                
             except Exception as e:
                 last_err = str(e)
-                if "429" in last_err:
-                    # 4. 429 atingido! Parar a fila global entre 20s e 120s
-                    wait_time = min(20 * (attempt + 1) + random.uniform(5.0, 15.0), 120.0)
-                    print(f"⚠️ [IMG Queue] 429 atingido. Fila parada por {wait_time:.0f}s (Tentativa {attempt+1}/{max_attempts})")
-                    _next_allowed_api_call = time.time() + wait_time
-                else:
-                    # Outro erro (ex: falha de ligação), espera apenas 5s
-                    _next_allowed_api_call = time.time() + 5.0
-        
-        # Pequena pausa fora do lock antes da próxima tentativa deste pedido para não encravar o bot
-        await asyncio.sleep(1) 
-        
+                print(f"[IMG] Tentativa {attempt+1} falhou: {last_err}")
+                if attempt < max_attempts - 1:
+                    await asyncio.sleep(5)
+
     raise Exception(f"Falha após {max_attempts} tentativas. Último erro: {last_err}")
-    
-    fixed_seed = sum(ord(c) for c in mon_name) + 100
-    async with _image_lock: # Um por vez
-        try:
-            return await generate_monster_image_safe(prompt, fixed_seed)
-        except Exception as e:
-            if "429" in str(e):
-                print("API Congestionada, aguardando...")
-                await asyncio.sleep(10)
-            raise e
 # ══════════════════════════════════════════════
 # CONFIGURAÇÕES DE SAVE (NOVO)
 # ══════════════════════════════════════════════
@@ -1368,7 +1306,7 @@ def save_cached_monster_image(name: str, img_bytes: bytes) -> bool:
 async def _fetch_monster_image_bytes(entry):
     """Gera (via Pollinations AI) os bytes da imagem de um monstro. Não usa cache."""
     prompt = await gerar_prompt_imagem(entry)
-    return await generate_monster_image_safe(prompt)
+    return await generate_image_with_queue(prompt)
 
 # Carrega URLs ao iniciar
 _load_image_url_cache()
@@ -3154,16 +3092,11 @@ async def gerar_prompt_imagem(mon):
 async def monster_image(interaction: discord.Interaction, nome: str):
     await interaction.response.defer(thinking=True)
 
-    nome_lower = nome.lower()
-    entry = (
-        MON_INDEX.get(nome) or
-        MON_INDEX.get(nome.title()) or
-        next((m for m in MONS if m["n"].lower() == nome_lower), None) or
-        next((m for m in MONS if m["n"].lower().startswith(nome_lower)), None) or
-        BOSS_INDEX.get(nome) or
-        next((b for b in BOSSES if b["n"].lower() == nome_lower), None) or
-        next((b for b in BOSSES if b["n"].lower().startswith(nome_lower)), None)
-    )
+    entry = (MON_INDEX.get(nome) or
+             next((m for m in MONS if nome.lower() in m["n"].lower()), None) or
+             BOSS_INDEX.get(nome) or
+             next((b for b in BOSSES if nome.lower() in b["n"].lower()), None))
+
     if not entry:
         await interaction.followup.send(f"❌ Monster **{nome}** não encontrado!", ephemeral=True)
         return
@@ -3197,7 +3130,7 @@ async def monster_image(interaction: discord.Interaction, nome: str):
         MAX_ATTEMPTS = 5
         for attempt in range(MAX_ATTEMPTS):
             try:
-                img_bytes = await generate_image_with_queue(prompt)
+                img_bytes = await generate_image_with_queue(mon_name, prompt)
                 break
             except Exception as e:
                 last_err = str(e)
