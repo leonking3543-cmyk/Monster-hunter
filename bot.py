@@ -19,66 +19,35 @@ import io
 from typing import Optional
 
 # ══════════════════════════════════════════════
-# LOVABLE AI GATEWAY — Geração de imagem (Nano Banana)
+# POLLINATIONS AI — Geração de imagem (100% gratuito, sem API key)
 # ══════════════════════════════════════════════
-LOVABLE_API_KEY = os.environ.get("LOVABLE_API_KEY", "").strip()
-LOVABLE_AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions"
-LOVABLE_IMAGE_MODEL = "google/gemini-2.5-flash-image"  # Nano Banana
+POLLINATIONS_URL = "https://image.pollinations.ai/prompt/{prompt}"
 
 async def _lovable_generate_image_bytes(prompt: str) -> bytes:
     """
-    Gera bytes PNG de uma imagem usando o Lovable AI Gateway (Nano Banana).
-    Estável e gratuito (dentro do tier do workspace Lovable).
+    Gera bytes PNG de uma imagem usando a Pollinations AI.
+    Totalmente gratuito, sem API key, sem limites de créditos.
     Lança Exception com mensagem clara em caso de erro.
     """
-    if not LOVABLE_API_KEY:
-        raise Exception(
-            "LOVABLE_API_KEY não configurada. Define a variável de ambiente "
-            "LOVABLE_API_KEY no servidor onde o bot corre."
-        )
+    # Parâmetros fixos: 1024x1024, modelo flux (melhor qualidade), seed aleatório
+    seed = random.randint(1, 999999)
+    encoded_prompt = urllib.parse.quote(prompt)
+    url = (
+        f"https://image.pollinations.ai/prompt/{encoded_prompt}"
+        f"?width=1024&height=1024&model=flux&seed={seed}&nologo=true&enhance=true"
+    )
 
-    payload = {
-        "model": LOVABLE_IMAGE_MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "modalities": ["image", "text"],
-    }
-    headers = {
-        "Authorization": f"Bearer {LOVABLE_API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    timeout = aiohttp.ClientTimeout(total=120, connect=15)
+    timeout = aiohttp.ClientTimeout(total=180, connect=20)
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.post(LOVABLE_AI_URL, json=payload, headers=headers) as resp:
+        async with session.get(url) as resp:
             if resp.status == 429:
-                raise Exception("Lovable AI rate-limit (429) — tenta novamente daqui a uns segundos")
-            if resp.status == 402:
-                raise Exception("Lovable AI sem créditos (402) — adiciona créditos em Settings → Workspace → Usage")
+                raise Exception("Pollinations AI rate-limit (429) — tenta novamente daqui a uns segundos")
             if resp.status != 200:
-                body = await resp.text()
-                raise Exception(f"Lovable AI HTTP {resp.status}: {body[:200]}")
-            data = await resp.json()
-
-    try:
-        image_url = data["choices"][0]["message"]["images"][0]["image_url"]["url"]
-    except (KeyError, IndexError, TypeError):
-        raise Exception(f"Resposta inesperada da Lovable AI: {str(data)[:200]}")
-
-    if image_url.startswith("data:"):
-        try:
-            b64 = image_url.split(",", 1)[1]
-            img_bytes = base64.b64decode(b64)
-        except Exception as e:
-            raise Exception(f"Falha a descodificar base64 da imagem: {e}")
-    else:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(image_url) as resp:
-                if resp.status != 200:
-                    raise Exception(f"Falha a baixar imagem URL ({resp.status})")
-                img_bytes = await resp.read()
+                raise Exception(f"Pollinations AI HTTP {resp.status}")
+            img_bytes = await resp.read()
 
     if not img_bytes or len(img_bytes) < 1000:
-        raise Exception("Imagem vazia/corrompida recebida da Lovable AI")
+        raise Exception("Imagem vazia/corrompida recebida da Pollinations AI")
     return img_bytes
 # ══════════════════════════════════════════════
 # CONFIGURAÇÕES DE SAVE (NOVO)
@@ -3113,7 +3082,7 @@ async def monster_image(interaction: discord.Interaction, nome: str):
             color=RARE_COLOR.get(entry.get("rare"), 0x888888)
         )
         embed.set_image(url="attachment://monster.png")
-        embed.set_footer(text="🎨 Gerado com Lovable AI (Nano Banana)")
+        embed.set_footer(text="🎨 Gerado com Pollinations AI (flux)")
 
         await interaction.followup.send(embed=embed, file=file)
 
