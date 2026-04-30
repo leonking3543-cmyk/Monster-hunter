@@ -815,7 +815,7 @@ BOSS_DESCRIPTIONS = {
     "Rainha das Fadas":      "🧚 Fada | Protetora dos reinos encantados desde o início dos tempos.",
     "Void King":             "👑 Cristal | Rei do vazio — existência além da compreensão mortal.",
     "Nico":                  "🐈 Fofa | A destruidora de mundos. Aparência enganosa. Ronronas antes de devastar.",
-    "murilo":                "👨‍🦽 ??? | O inominável do caos. Não faça perguntas sobre ele.",
+    "murilo":                "👨‍🦽 viado | O inominável do caos. Não faça perguntas sobre ele.",
     "???":                   "❓ ??? | Entidade desconhecida — nem o universo sabe o que é isso.",
 }
 
@@ -1116,7 +1116,7 @@ TYPE_EMOJIS={
     "sombra":"🌑","cristal":"💎","veneno":"☠️","som":"🎵","tempo":"⌛","luz":"☀️","cosmos":"🌌",
     "metal":"⚙️","fantasma":"👻","dragão":"🐉","fada":"🧚","psíquico":"🔮","luta":"👊",
     "inseto":"🐛","néon":"🟢","nuclear":"☢️","espírito":"🙏","mecânico":"🤖","ventos":"🌪️",
-    "magma":"🌋","arcano":"🪄","boss":"⚔️","fofa":"🐈","molestador":"👨‍🦽","???":"❓","Deus":"🌟",
+    "magma":"🌋","arcano":"🪄","boss":"⚔️","fofa":"🐈","viado":"👨‍🦽","???":"❓","Deus":"🌟",
 }
 def type_badge(t): return f"{TYPE_EMOJIS.get(t,'❓')} `{t.upper()}`"
 def rare_badge(r): return f"{RARE_EMOJI.get(r,'❓')} `{r.upper()}`"
